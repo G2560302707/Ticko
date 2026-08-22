@@ -6,7 +6,7 @@
 > - 入口外壳：`main_app.py`（pywebview + pystray + Win32 透明桌宠）
 > - 后端核心：`app.py`（每 3 秒采样、SQLite 三本账、本地 HTTP + REST API）
 > - 桌宠：`pet_engine.py` / `pet_geom.py` / `pet_view.py` / `pet_packs.py`
-> - AI 伴侣：`companion.py` / `companion_ai.py` / `companion_templates.py`
+> - AI 伴侣：`companion.py` 1/ `companion_ai.py` / `companion_templates.py`
 > - 分类：`classify.py` + `classify_words.py`
 > - 其它：`goals_util.py`（目标）、`pomodoro_util.py`（番茄钟）、`sound_util.py`、`speech_util.py`、`theme_util.py`、`window_space.py`（当前未启用）
 
