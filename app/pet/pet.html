@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>使用时长桌宠</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; cursor: grab; }
+  body.drag { cursor: grabbing; }
+  #stage { position: relative; width: 100%; height: 100%; }
+  #bubble {
+    position: absolute; left: 50%; top: 4px; transform: translateX(-50%);
+    max-width: 92%; padding: 6px 10px; border-radius: 10px;
+    background: rgba(255,255,255,.92); color: #3c3c50; font: 11px/1.35 "Segoe UI","Microsoft YaHei UI",sans-serif;
+    box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; pointer-events: none; z-index: 4;
+  }
+  #bubble.inner { background: rgba(232,232,238,.92); color: #7d7d8a; font-style: italic; }
+  #chip {
+    display: none; position: absolute; left: 50%; top: 8px; transform: translateX(-50%);
+    z-index: 5; background: rgba(255,255,255,.92); border: 1px solid rgba(0,0,0,.06);
+    border-radius: 14px; padding: 6px 10px; font: 13px "Segoe UI","Microsoft YaHei UI",sans-serif;
+    color: #1a1a1a; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.16);
+  }
+  #chip:hover { background: #fff; }
+  #fish {
+    position: absolute; left: 50%; bottom: 6px;
+    width: 92%; height: var(--sh, 187px);
+    transform-origin: 50% 100%;
+  }
+  #fish img {
+    position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    height: var(--sh, 187px); width: auto; pointer-events: none;
+    filter: drop-shadow(0 8px 10px rgba(0,0,0,.28));
+    opacity: 0;
+  }
+  #fish img.on { opacity: 1; }
+  #fish.away img { filter: brightness(.7) saturate(.85) drop-shadow(0 8px 10px rgba(0,0,0,.28)); }
+  #food {
+    display: none; position: absolute; left: 50%; top: 6px; transform: translateX(-50%);
+    z-index: 6; background: rgba(40,40,60,.9); border-radius: 14px; padding: 8px 10px;
+    white-space: nowrap;
+  }
+  #food button {
+    width: 36px; height: 36px; margin: 0 3px; border: 2px solid #ffb3c8; border-radius: 18px;
+    background: rgba(255,255,255,.92); font-size: 18px; cursor: pointer;
+  }
+  #food button:hover { background: #ffe3ec; border-color: #ff7fa8; }
+  #food .x { width: 22px; height: 22px; border: 0; font-size: 12px; color: #666; background: rgba(255,255,255,.85); }
+  #menu {
+    display: none; position: absolute; z-index: 7; min-width: 148px;
+    background: #fff; color: #222; border-radius: 8px;
+    font: 13px "Segoe UI","Microsoft YaHei UI",sans-serif; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,.22);
+  }
+  #menu button, #menu .lab {
+    display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: inherit; padding: 7px 12px; cursor: pointer;
+  }
+  #menu button:hover { background: #f0f3ff; }
+  #menu .lab { color: #888; font-size: 11px; padding: 6px 12px 2px; cursor: default; }
+  #menu button.on { color: #4575ed; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bubble"></div>
+  <button id="chip" type="button">打开面板</button>
+  <div id="food">
+    <button data-food="🐟">🐟</button>
+    <button data-food="🍰">🍰</button>
+    <button data-food="🍭">🍭</button>
+    <button data-food="🍡">🍡</button>
+    <button data-food="💎">💎</button>
+    <button class="x" type="button">✕</button>
+  </div>
+  <div id="fish">
+    <img id="sprPrev" alt="">
+    <img id="sprCur" class="on" alt="">
+  </div>
+  <div id="menu"></div>
+</div>
+<script>
+var bubble = document.getElementById('bubble');
+var chip = document.getElementById('chip');
+var food = document.getElementById('food');
+var menu = document.getElementById('menu');
+var fish = document.getElementById('fish');
+var sprCur = document.getElementById('sprCur');
+var sprPrev = document.getElementById('sprPrev');
+var pose = {dir:'down', facing:1, walking:false, away:false, sprite_h:187};
+var jump_t = 0, action='', action_t=0, eat_t=0, cross_t=0;
+var dragging=false, moved=false, clickTimer=0, pressSX=0, pressSY=0;
+var bubbleUntil=0, chipUntil=0;
+var mode='wander', sizeLabel='小';
+
+function apiReady(){ return window.pywebview && window.pywebview.api; }
+function srcFor(dir, h){
+  var n = dir==='up' ? 'back' : (dir==='left'||dir==='right' ? 'side' : 'front');
+  return '/pet/sprites/' + n + '_' + h + '.png';
+}
+function applySprite(dir, facing, h, cross){
+  var next = srcFor(dir, h);
+  document.documentElement.style.setProperty('--sh', h + 'px');
+  if(cross && sprCur.src && sprCur.getAttribute('data-src') !== next){
+    sprPrev.src = sprCur.src;
+    sprPrev.className = 'on';
+    sprPrev.style.transform = sprCur.style.transform;
+    cross_t = 1;
+  }
+  sprCur.src = next;
+  sprCur.setAttribute('data-src', next);
+  sprCur.className = 'on';
+  var sc = (dir==='left'||dir==='right') && facing<0 ? -1 : 1;
+  sprCur.style.transform = 'translateX(-50%) scaleX(' + sc + ')';
+}
+function say(text, inner){
+  if(!text) return;
+  bubble.textContent = text;
+  bubble.className = inner ? 'inner' : '';
+  bubble.style.display = 'block';
+  bubbleUntil = performance.now() + 2800;
+}
+window.__petApply = function(s){
+  if(!s) return;
+  var dir = s.dir || pose.dir;
+  var facing = s.facing!=null ? s.facing : pose.facing;
+  var h = s.sprite_h || pose.sprite_h;
+  var changed = dir!==pose.dir || facing!==pose.facing || h!==pose.sprite_h;
+  pose.dir = dir;
+  pose.facing = facing;
+  pose.sprite_h = h;
+  if(s.walking!=null) pose.walking = !!s.walking;
+  if(s.away!=null) pose.away = !!s.away;
+  if(s.size) sizeLabel = s.size;
+  if(s.mode) mode = s.mode;
+  if(s.jump) jump_t = s.jump;
+  if(s.action){ action = s.action; action_t = 1; }
+  if(s.eat) eat_t = 1;
+  if(s.say) say(s.say, !!s.inner);
+  if(changed) applySprite(pose.dir, pose.facing, pose.sprite_h, true);
+  fish.className = pose.away ? 'away' : '';
+};
+var lastNow=0;
+function render(now){
+  var dt = lastNow ? Math.min(48, now-lastNow) : 20;
+  lastNow = now;
+  var steps = dt/20;
+  if(jump_t>0) jump_t = Math.max(0, jump_t - 0.06*steps);
+  if(action_t>0){ action_t = Math.max(0, action_t - 0.03*steps); if(!action_t) action=''; }
+  if(eat_t>0) eat_t = Math.max(0, eat_t - 0.05*steps);
+  if(cross_t>0){
+    cross_t = Math.max(0, cross_t - 0.15*steps);
+    sprPrev.style.opacity = String(cross_t);
+    if(cross_t===0) sprPrev.className = '';
+  }
+  if(bubbleUntil && now>bubbleUntil){ bubble.style.display='none'; bubbleUntil=0; }
+  if(chipUntil && now>chipUntil){ chip.style.display='none'; chipUntil=0; }
+  var t = now/1000;
+  var walking = pose.walking && !pose.away && !dragging;
+  var sway = walking ? Math.sin(t*9)*3.5 : Math.sin(t*2.5)*1.5;
+  var bob = walking ? -Math.abs(Math.sin(t*4.5))*7 : (pose.away ? Math.sin(t*2)*3+4 : 0);
+  var breath = 1 + 0.02*Math.sin(t*2.5);
+  var jump = jump_t>0 ? -Math.abs(Math.sin(jump_t*Math.PI))*14*jump_t : 0;
+  var rot = sway;
+  var sx = 1, sy = 1;
+  if(action==='sway') rot += Math.sin(action_t*Math.PI*2)*10*action_t;
+  if(action==='stretch'){ sy += 0.06*Math.sin(action_t*Math.PI); sx += -0.03*Math.sin(action_t*Math.PI); }
+  if(eat_t>0){ sy += 0.08*Math.sin(eat_t*Math.PI); sx -= 0.04*Math.sin(eat_t*Math.PI); }
+  if(pose.away) rot -= 8;
+  fish.style.transform = 'translateX(-50%) translateY(' + (jump+bob) + 'px) rotate(' + rot + 'deg) scale(' + (breath*sx) + ',' + (breath*sy) + ')';
+}
+function loop(now){
+  render(now||performance.now());
+  requestAnimationFrame(loop);
+}
+function hidePop(){
+  menu.style.display='none';
+  food.style.display='none';
+}
+function showChip(){
+  chip.style.display='block';
+  chipUntil = performance.now() + 3500;
+}
+function buildMenu(){
+  var modes = [['wander','自由散步'],['follow','跟随鼠标'],['still','原地待着']];
+  var sizes = [['小','小'],['中','中'],['大','大']];
+  var html = '<div class="lab">模式</div>';
+  modes.forEach(function(m){ html += '<button data-mode="'+m[0]+'" class="'+(mode===m[0]?'on':'')+'">'+m[1]+'</button>'; });
+  html += '<div class="lab">大小</div>';
+  sizes.forEach(function(m){ html += '<button data-size="'+m[0]+'" class="'+(sizeLabel===m[0]?'on':'')+'">'+m[1]+'</button>'; });
+  html += '<button data-act="open">打开面板</button>';
+  html += '<button data-act="food">喂食</button>';
+  html += '<button data-act="snap">回到屏幕内</button>';
+  html += '<button data-act="hide">隐藏桌宠</button>';
+  menu.innerHTML = html;
+}
+chip.onclick = function(e){ e.stopPropagation(); if(apiReady()) pywebview.api.open_panel(); chip.style.display='none'; };
+food.addEventListener('click', function(e){
+  e.stopPropagation();
+  if(e.target.classList.contains('x')){ food.style.display='none'; return; }
+  var f = e.target.getAttribute('data-food');
+  if(f && apiReady()){ pywebview.api.pet_feed(f).then(function(s){ if(s) window.__petApply(s); }); food.style.display='none'; }
+});
+menu.addEventListener('click', function(e){
+  var t = e.target;
+  if(!t || t.tagName!=='BUTTON') return;
+  menu.style.display='none';
+  if(!apiReady()) return;
+  if(t.dataset.mode){ mode=t.dataset.mode; pywebview.api.set_mode(mode).then(function(s){ if(s) window.__petApply(s); }); }
+  if(t.dataset.size){ sizeLabel=t.dataset.size; pywebview.api.set_size(sizeLabel).then(function(s){ if(s) window.__petApply(s); }); }
+  if(t.dataset.act==='open') pywebview.api.open_panel();
+  if(t.dataset.act==='food') food.style.display='block';
+  if(t.dataset.act==='snap') pywebview.api.snap_pet().then(function(s){ if(s) window.__petApply(s); });
+  if(t.dataset.act==='hide') pywebview.api.hide_pet();
+});
+document.addEventListener('mousedown', function(e){
+  if(e.button!==0) return;
+  if(e.target.closest('#menu') || e.target.closest('#food') || e.target===chip) return;
+  hidePop();
+  dragging=true; moved=false; pressSX=e.screenX; pressSY=e.screenY;
+  document.body.classList.add('drag');
+  if(apiReady()) pywebview.api.begin_drag();
+});
+document.addEventListener('mousemove', function(e){
+  if(!dragging) return;
+  if(Math.abs(e.screenX-pressSX)+Math.abs(e.screenY-pressSY)>6) moved=true;
+});
+document.addEventListener('mouseup', function(e){
+  if(e.button!==0) return;
+  document.body.classList.remove('drag');
+  if(!dragging) return;
+  dragging=false;
+  if(!apiReady()) return;
+  pywebview.api.end_drag().then(function(s){
+    if(s) window.__petApply(s);
+    if((s && s.moved) || moved) return;
+    clearTimeout(clickTimer);
+    clickTimer=setTimeout(function(){
+      pywebview.api.pet_click().then(function(st){ if(st) window.__petApply(st); });
+      showChip();
+    }, 280);
+  });
+});
+document.addEventListener('dblclick', function(e){
+  if(e.button!==0) return;
+  clearTimeout(clickTimer);
+  hidePop();
+  food.style.display='block';
+});
+document.addEventListener('contextmenu', function(e){
+  e.preventDefault();
+  hidePop();
+  buildMenu();
+  menu.style.left = Math.min(e.clientX, window.innerWidth-160)+'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight-220)+'px';
+  menu.style.display='block';
+});
+window.addEventListener('pywebviewready', function(){
+  applySprite('down', 1, 187, false);
+  if(apiReady()){
+    pywebview.api.pet_state().then(function(s){ window.__petApply(s); });
+  }
+  say('点我说话，右键切换模式');
+});
+applySprite('down', 1, 187, false);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

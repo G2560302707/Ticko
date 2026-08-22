@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ticko · 时间记录</title>
+<style>
+  :root {
+    --bg: #101419; --text: #f3f5f7; --muted: #98a5b5; --card: #171d24;
+    --raised: #202833; --field: #0d1217; --track: #0d1217; --line: #2b3541;
+    --green: #49c7a3; --amber: #e7ab57; --blue: #78aef8; --violet: #a894e8;
+    --chart-grid: rgba(152, 165, 181, .14); --chart-text: #98a5b5; --chart-cell: #101419;
+    --shadow: rgba(0, 0, 0, .28); --on-accent: #08231b;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--text); background: var(--bg); overflow: hidden; }
+  .shell { position: relative; height: 100%; display: grid; grid-template-rows: 60px 1fr; }
+  .nav { display: flex; align-items: center; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--card); }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 760; margin-right: 18px; letter-spacing: -.025em; }
+  .brand-mark { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 28px; overflow: hidden; border-radius: 8px; }
+  .brand-mark svg { width: 100%; height: 100%; display: block; }
+  .brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .brand-name { font-size: 16px; line-height: 1; }
+  .brand small { color: var(--muted); font-size: 11px; font-weight: 500; margin-left: 2px; letter-spacing: 0; }
+  .nav a { color: var(--muted); text-decoration: none; padding: 8px 11px; border-radius: 8px; font-size: 13px; transition: background .16s ease, color .16s ease; }
+  .nav a:hover, .nav a:focus-visible { color: var(--text); background: var(--raised); outline: none; }
+  .nav a.on { color: var(--text); background: var(--raised); box-shadow: inset 0 -2px 0 var(--green); }
+  .main { overflow: auto; padding: 18px; height: 100%; min-height: 0; }
+  .page { display: none; height: 100%; min-height: 0; overflow: hidden; }
+  .page.on { display: flex; flex-direction: column; gap: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; flex-shrink: 0; }
+  .card, .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; box-shadow: 0 1px 0 rgba(255,255,255,.025), 0 8px 20px var(--shadow); }
+  .label { font-size: 12px; color: var(--muted); }
+  .value { font-size: 28px; font-weight: 720; font-variant-numeric: tabular-nums; margin-top: 6px; letter-spacing: -.02em; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1; min-height: 0; }
+  .panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; padding-top: 2px; line-height: 1.4; flex-shrink: 0; }
+  .chart-box { flex: 1; min-height: 180px; width: 100%; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  .scroll { flex: 1; min-height: 0; overflow: auto; }
+  .main, .scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
+  }
+  .main::-webkit-scrollbar, .scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .main::-webkit-scrollbar-track, .scroll::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb, .scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 45%, transparent);
+    border-radius: 99px;
+  }
+  .main::-webkit-scrollbar-thumb:hover, .scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--green) 70%, var(--muted));
+  }
+  #timeline { position: relative; height: 62px; border-radius: 8px; background: var(--track); overflow: hidden; border: 1px solid var(--line); }
+  .seg { position: absolute; top: 0; height: 100%; border-right: 1px solid color-mix(in srgb, var(--card) 56%, transparent); }
+  .seg-active { background: var(--green); } .seg-away { background: var(--muted); } .seg-sleep { background: var(--raised); }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .tip { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  button, .btn { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
+  button:hover, .btn:hover { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); transform: translateY(-1px); }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  input, textarea, select { box-sizing: border-box; background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; width: 100%; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  textarea { min-height: 180px; font-family: Consolas, monospace; font-size: 12px; }
+  .themes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch { width: 132px; height: 78px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; display: flex; align-items: flex-end; padding: 9px; font-size: 12px; font-weight: 650; box-shadow: inset 0 -24px 24px rgba(0,0,0,.24); transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+  .swatch:hover { transform: translateY(-2px); }
+  .swatch.on { border-color: var(--green); box-shadow: inset 0 0 0 2px var(--green), inset 0 -24px 24px rgba(0,0,0,.24); }
+  .p-midnight { background: linear-gradient(135deg,#0d1217,#253544); } .p-daylight { background: linear-gradient(135deg,#f8fbff,#cdddeb); color: #17212e; box-shadow: inset 0 -24px 24px rgba(255,255,255,.1); }
+  .p-forest { background: linear-gradient(135deg,#12251a,#416c4c); } .p-contrast { background: linear-gradient(135deg,#000,#303030); color: #fff; }
+  #page-timeline { gap: 12px; }
+  #page-timeline > .timeline-hero { flex: 0 0 auto; padding: 18px 22px 15px; }
+  #page-timeline > .record-layout { grid-template-columns: minmax(330px, .82fr) minmax(500px, 1.18fr); flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  #page-timeline .timeline-hourly, #page-timeline .timeline-session { height: auto; min-height: 0; padding: 18px 20px; }
+  #page-timeline .timeline-session .scroll { overflow-y: auto; }
+  .timeline-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:14px; }
+  .timeline-head h2, .record-panel-head h2 { margin:0; }
+  .timeline-metrics { display:flex; align-items:stretch; border:1px solid var(--line); border-radius:9px; overflow:hidden; flex-shrink:0; }
+  .timeline-metric { padding:6px 12px; min-width:92px; border-right:1px solid var(--line); }
+  .timeline-metric:last-child { border:0; }
+  .timeline-metric span { display:block; color:var(--muted); font-size:11px; }
+  .timeline-metric strong { display:block; margin-top:3px; font-size:13px; font-variant-numeric:tabular-nums; }
+  #timeline { height:76px; border-radius:10px; background:linear-gradient(90deg, var(--track), color-mix(in srgb, var(--raised) 72%, var(--track)), var(--track)); }
+  .timeline-ruler { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; margin-top:7px; }
+  .timeline-legend { display:flex; gap:14px; align-items:center; min-height:18px; margin-top:10px; font-size:11px; color:var(--muted); }
+  .timeline-legend i { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:4px; }
+  .timeline-legend .tip { margin:0 0 0 auto; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .record-panel-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:12px; }
+  .session-feed { display:grid; gap:2px; padding:2px 0; }
+  .session-row { display:grid; grid-template-columns:minmax(144px,.8fr) minmax(220px,1.35fr) minmax(100px,.85fr) 78px; gap:12px; align-items:center; min-height:59px; padding:0 8px; border-bottom:1px solid var(--line); border-radius:8px; }
+  .session-row:hover { background:var(--raised); }
+  .session-time { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .session-app-cell { display:flex; align-items:center; gap:9px; min-width:0; font-weight:600; }
+  .session-app-cell .app-icon { width:28px; height:28px; flex-basis:28px; border-radius:7px; font-size:11px; }
+  .session-app-cell span:last-child, .session-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .session-title { color:var(--muted); font-size:12px; }
+  .session-duration { text-align:right; font-size:12px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .state-a { color: var(--green); }
+  .state-w { color: var(--amber); }
+  .now, .insights { display: grid; gap: 10px; flex-shrink: 0; }
+  /* 当前会话和目标已进入首屏；这两组旧 KPI 保留数据绑定但不再占用界面。 */
+  .now, .insights { display: none; }
+  .now { grid-template-columns: 1.4fr 1fr 1fr; }
+  .insights { grid-template-columns: repeat(4, 1fr); }
+  .now .value, .insights .value { font-size: 20px; }
+  .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .bar-track { height: 6px; margin-top: 10px; background: var(--track); border-radius: 99px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 0; background: var(--green); border-radius: 99px; transition: width .4s ease; }
+  .mini-tl { position: relative; height: 34px; border-radius: 8px; background: var(--track); overflow: hidden; border: 1px solid var(--line); }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 99px; margin-right: 5px; }
+  #page-overview.page.on, #page-settings.page.on, #page-category.page.on, #page-timer.page.on { overflow: auto; }
+  #page-overview .grid2 { flex: 1 0 220px; }
+  #page-settings .grid2 { flex: 1 1 auto; align-items: stretch; min-height: 260px; }
+  #page-settings .panel { overflow: auto; min-height: 0; }
+  .pet-settings { flex: 0 0 auto; overflow: visible !important; }
+  .pet-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+  .pet-settings-head h2 { margin-bottom: 4px; font-size: 18px; }
+  .pet-settings-head .tip { margin: 0; }
+  .pet-settings-head .primary { background: var(--green); border-color: var(--green); color: var(--on-accent); font-weight: 650; white-space: nowrap; }
+  .pet-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+  .pet-pack-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .pet-pack-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .pet-pack-list { display: flex; gap: 10px; overflow-x: auto; padding: 10px 2px 4px; }
+  .pet-pack-card { position: relative; flex: 0 0 112px; height: 118px; padding: 8px; display: grid; grid-template-rows: 1fr auto; gap: 5px; background: var(--field); }
+  .pet-pack-card.on { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+  .pet-pack-card img { width: 100%; height: 80px; object-fit: contain; }
+  .pet-pack-card span { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pet-pack-import summary { cursor: pointer; color: var(--green); font-size: 12px; }
+  .pet-pack-form { display: grid; grid-template-columns: 1fr repeat(3, minmax(140px, .8fr)) auto; gap: 8px; align-items: end; margin-top: 10px; }
+  .pet-pack-form label { display: grid; gap: 5px; }
+  .pet-pack-form input[type=file] { font-size: 11px; }
+  .pet-pack-actions { display: flex; gap: 8px; margin-top: 9px; }
+  .setting-field { display: grid; gap: 7px; align-content: start; }
+  .setting-field .label { font-size: 12px; }
+  .pet-lines-field { grid-column: 1 / -1; }
+  textarea.pet-lines { min-height: 96px; resize: vertical; font-family: inherit; font-size: 13px; line-height: 1.6; }
+  .pet-save-status { min-height: 1.4em; margin-top: 10px; }
+  #page-settings #rules { flex: 1 1 auto; min-height: 180px; }
+  #catRows tr, #breakApps tr { cursor: pointer; }
+  #catRows tr.on, #breakApps tr.on { background: var(--raised); }
+  .split-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .ov-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; }
+  .ov-row input[type=range] { flex: 1; width: auto; }
+  .ov-row span { min-width: 2.4em; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .pack-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .pack-row select { flex: 1; min-width: 160px; width: auto; }
+  .pack-row .btn { width: auto; flex: 0 0 auto; }
+  .overview-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 1fr); gap: 12px; flex-shrink: 0; }
+  .goal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; min-width: 0; }
+  .goal-grid.single { grid-template-columns: 1fr; }
+  .goal-card .value { font-size: 18px; }
+  .goal-card.done { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); }
+  .goal-card.near { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+  .goal-card.over { border-color: color-mix(in srgb, var(--amber) 70%, var(--line)); }
+  .goal-card.over .bar-fill { background: var(--amber); }
+  .goal-card.done .bar-fill { background: var(--green); }
+  .goal-form { display: grid; gap: 8px; }
+  .goal-row { display: grid; grid-template-columns: 4.5em 1fr 1fr; gap: 8px; align-items: center; }
+  .dur-stepper { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+  .dur-btn { width: 32px; flex: 0 0 32px; padding: 0; border-radius: 8px; font-size: 16px; line-height: 1; background: var(--raised); }
+  .dur-in { flex: 1; min-width: 0; text-align: center; }
+  .hours-hint { font-size: 11px; color: var(--muted); }
+  .cat-strip-wrap { flex: 0 0 auto; }
+  .cat-total { font-size: 13px; color: var(--muted); margin: -4px 0 10px; }
+  .cat-strip { display: flex; height: 28px; border-radius: 10px; overflow: hidden; background: var(--track); }
+  .cat-seg { min-width: 0; height: 100%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.45); }
+  .cat-empty { font-size: 12px; color: var(--muted); padding: 8px 0; }
+  .cat-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 12px; }
+  .cat-leg { display: grid; grid-template-columns: 10px auto 1fr auto; gap: 4px 8px; align-items: center; cursor: pointer; font-size: 12px; }
+  .cat-leg i { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+  .cat-leg .bar-track { grid-column: 1 / -1; margin-top: 2px; }
+  .pomo-banner { display: none; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+  .pomo-banner.on { display: flex; }
+  .pomo-banner .value { font-size: 22px; margin-top: 0; }
+  .timer-shell { width: min(920px, 100%); margin: 0 auto; display: grid; gap: 12px; padding-bottom: 18px; }
+  .timer-hero { padding: 24px; background: color-mix(in srgb, var(--green) 7%, var(--card)); }
+  .timer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .timer-head h2 { margin: 0; font-size: 20px; font-weight: 650; }
+  .timer-state { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; }
+  .pomo-clock { font-size: clamp(58px, 9vw, 88px); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.035em; line-height: 1; margin: 28px 0 12px; }
+  .timer-main-actions, .timer-presets, .pomo-actions, .sound-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .timer-main-actions { margin-top: 22px; }
+  .timer-main-actions button { min-width: 110px; }
+  .timer-main-actions .primary { background: var(--green); border-color: var(--green); color: var(--on-accent); font-weight: 650; }
+  .timer-presets { align-items: center; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .timer-presets .label { margin-right: 4px; }
+  .timer-duration { display: grid; grid-template-columns: 5em minmax(150px,1fr) minmax(150px,1fr) auto; gap: 10px; align-items: center; margin-top: 18px; }
+  .timer-duration .btn { white-space: nowrap; }
+  .timer-subgrid { display: grid; grid-template-columns: .85fr 1.15fr; gap: 12px; }
+  .timer-subgrid .panel { overflow: visible; }
+  .timer-advanced { margin-top: 10px; }
+  .timer-advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
+  .timer-advanced[open] summary { margin-bottom: 10px; }
+  .sound-chip { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; background: var(--raised); font-size: 13px; }
+  .sound-chip.on { border-color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+  .pomo-flash { animation: pomoflash .9s ease; }
+  .today-hero { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(210px,.75fr); gap: 12px; flex-shrink: 0; }
+  .today-status { min-height: 116px; display: flex; flex-direction: column; justify-content: space-between; }
+  .today-status .value { font-size: clamp(26px, 3vw, 38px); }
+  .today-total { display: flex; flex-direction: column; justify-content: center; background: color-mix(in srgb, var(--green) 9%, var(--card)); }
+  .today-total .value { color: var(--green); font-size: clamp(32px, 4vw, 46px); }
+  .section-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .section-head .tip { margin: 0; }
+  .chart-note { font-size: 11px; color: var(--muted); }
+  .settings-section { margin: 4px 0 0; }
+  .settings-section > summary { cursor: pointer; list-style: none; font-weight: 650; font-size: 15px; padding: 4px 0 12px; }
+  .settings-section > summary::-webkit-details-marker { display: none; }
+  .settings-section > summary::after { content: '展开'; float: right; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .settings-section[open] > summary::after { content: '收起'; }
+  .toast { position: fixed; z-index: 20; right: 20px; bottom: 20px; max-width: 360px; padding: 11px 14px; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 8px; box-shadow: 0 12px 32px var(--shadow); transform: translateY(16px); opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+  .apps-shell { width: min(1180px, 100%); margin: 0 auto; display: grid; gap: 12px; padding-bottom: 16px; }
+  .apps-summary { display: grid; grid-template-columns: minmax(0,1.4fr) repeat(2, minmax(120px,.55fr)); gap: 18px; align-items: center; padding: 18px 20px; }
+  .apps-summary h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+  .apps-summary p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+  .apps-summary .value { margin: 2px 0 0; color: var(--green); font-size: 25px; }
+  .apps-stat { padding-left: 16px; border-left: 1px solid var(--line); }
+  .apps-stat .label { display: block; }
+  .apps-stat strong { display: block; margin-top: 5px; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .app-spotlight { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .spot-card { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 13px 14px; min-height: 48px; }
+  .spot-card:first-child { border-color: color-mix(in srgb, var(--green) 46%, var(--line)); background: color-mix(in srgb, var(--green) 7%, var(--card)); }
+  .spot-rank { color: var(--muted); font-size: 12px; }
+  .spot-name { min-width: 0; font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spot-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .app-list { display: grid; gap: 2px; padding: 6px; }
+  .app-list-head { display: grid; grid-template-columns: 42px minmax(180px,1fr) minmax(120px,2.2fr) 84px 56px; gap: 14px; padding: 5px 12px 8px; color: var(--muted); font-size: 11px; }
+  .app-list-head span:nth-last-child(-n+2) { text-align: right; }
+  .app-row { display: grid; grid-template-columns: 42px minmax(180px,1fr) minmax(120px,2.2fr) 84px 56px; align-items: center; gap: 14px; min-height: 54px; padding: 0 12px; border-radius: 8px; cursor: default; }
+  .app-row:hover { background: var(--raised); }
+  .app-rank { color: var(--muted); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+  .app-ident { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 600; }
+  .app-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; overflow: hidden; background: var(--field); color: var(--text); font-size: 13px; font-weight: 750; }
+  .app-icon svg { width: 100%; height: 100%; display: block; }
+  .app-icon-image { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .app-fallback[hidden] { display: none; }
+  .app-bar { height: 7px; background: var(--track); border-radius: 99px; overflow: hidden; }
+  .app-bar b { display:block; height:100%; border-radius:inherit; background: linear-gradient(90deg,var(--blue),var(--green)); }
+  .app-duration, .app-share { font-variant-numeric: tabular-nums; text-align: right; }
+  .app-duration { color: var(--text); font-weight: 600; } .app-share { color: var(--muted); font-size: 12px; }
+  .app-empty { padding: 40px 16px; text-align:center; color:var(--muted); }
+  .overview-brief { display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; padding: 0; overflow: hidden; }
+  .brief-item { min-width: 0; padding: 14px 16px; border-right: 1px solid var(--line); }
+  .brief-item:last-child { border-right: 0; }
+  .brief-item .label { display: block; }
+  .brief-value { display: block; margin-top: 5px; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-app { display:flex; align-items:center; gap:8px; min-width:0; }
+  .session-app .app-icon { width:24px; height:24px; flex-basis:24px; border-radius:6px; font-size:10px; }
+  .session-app span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .session-state { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; background:var(--muted); }
+  .session-state.active { background:var(--green); } .session-state.away { background:var(--amber); }
+  @media (max-width: 760px) { .app-row, .app-list-head { grid-template-columns: 32px minmax(0,1fr) 70px; gap: 10px; } .app-bar, .app-share { display:none; } .apps-summary { grid-template-columns:1fr 1fr; } .apps-summary > :first-child { grid-column:1 / -1; } .app-spotlight { grid-template-columns:1fr; } .overview-meta, .overview-brief { grid-template-columns:1fr; } .brief-item { border-right:0; border-bottom:1px solid var(--line); } .brief-item:last-child { border-bottom:0; } }
+  .toast.on { opacity: 1; transform: translateY(0); }
+  .toast.error { border-left-color: var(--amber); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  @keyframes pomoflash {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent); }
+    100% { box-shadow: 0 0 0 18px transparent; }
+  }
+  @media (max-width: 980px) {
+    .kpis, .grid2, .now, .insights, .goal-grid, .cat-legend, .today-hero, .overview-meta { grid-template-columns: 1fr; }
+    #page-timeline > .record-layout { grid-template-columns: 1fr; }
+    .timeline-head { align-items:flex-start; flex-direction:column; }
+    .timeline-metrics { width:100%; }
+    .timeline-metric { flex:1; }
+    .session-row { grid-template-columns:minmax(130px,.7fr) minmax(150px,1fr) 70px; gap:8px; }
+    .session-title { display:none; }
+    .timer-subgrid { grid-template-columns: 1fr; }
+    .timer-duration { grid-template-columns: 1fr 1fr; }
+    .timer-duration > .label { grid-column: 1 / -1; }
+    .pet-settings-head { align-items: flex-start; flex-direction: column; }
+    .pet-settings-grid { grid-template-columns: 1fr; }
+    .pet-lines-field { grid-column: auto; }
+    .pet-pack-form { grid-template-columns: 1fr; }
+    .live { display: none; }
+    .nav { overflow-x: auto; padding: 0 12px; }
+    .brand { position: sticky; left: 0; background: var(--card); padding-right: 8px; margin-right: 4px; }
+    .page.on { overflow: auto; height: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="nav">
+    <div class="brand" aria-label="Ticko，时间记录">
+      <span class="brand-mark" aria-hidden="true"><img src="/app/icon.png" alt=""></span>
+      <span class="brand-name">Ticko</span>
+    </div>
+    <a href="#overview" data-page="overview">今天</a>
+    <a href="#timeline" data-page="timeline">记录</a>
+    <a href="#apps" data-page="apps">应用</a>
+    <a href="#timer" data-page="timer">专注</a>
+    <a href="#settings" data-page="settings">设置</a>
+  </div>
+  <div class="main">
+    <div class="page" id="page-overview">
+      <div class="today-hero">
+        <div class="card today-status">
+          <div class="label">此刻</div>
+          <div class="value clip" id="now-app">—</div>
+          <div class="tip clip" id="now-title">正在连接本地记录服务</div>
+          <div class="meta"><span id="now-sess">00:00:00</span> · <span id="now-state">连接中</span></div>
+        </div>
+        <div class="card today-total">
+          <div class="label">有效使用</div>
+          <div class="value" id="c-active">00:00:00</div>
+        </div>
+      </div>
+      <div id="pomoBanner" class="card pomo-banner">
+        <div>
+          <div class="label" id="pomoBannerLabel">番茄钟</div>
+        </div>
+        <div class="value" id="pomoBannerClock" style="color:var(--green)">00:00</div>
+      </div>
+      <div class="overview-meta">
+        <div id="goalPanel" class="goal-grid"></div>
+        <div class="card overview-brief" aria-label="今日摘要">
+          <div class="brief-item"><span class="label">专注占比</span><strong class="brief-value" id="brief-focus">—</strong></div>
+          <div class="brief-item"><span class="label">应用切换</span><strong class="brief-value" id="brief-switch">—</strong></div>
+          <div class="brief-item"><span class="label">活跃时段</span><strong class="brief-value" id="brief-span">—</strong></div>
+        </div>
+      </div>
+      <div class="now">
+        <div class="card">
+          <div class="label">距判定离开</div>
+          <div class="value" id="now-idle">—</div>
+          <div class="tip">5 分钟无键鼠后计入离开，已过时间不回溯</div>
+        </div>
+        <div class="card">
+          <div class="label">今日最长专注</div>
+          <div class="value" id="now-longest">00:00:00</div>
+          <div class="tip clip" id="now-longest-app">暂无</div>
+        </div>
+        <div class="card">
+          <div class="label">今日离开 / 休眠</div>
+          <div class="value" id="c-away" style="color:var(--amber)">00:00:00</div>
+          <div class="tip">休眠 <span id="c-sleep">00:00:00</span> · 系统运行 <span id="c-system">00:00:00</span></div>
+        </div>
+      </div>
+      <div class="insights">
+        <div class="card">
+          <div class="label">专注占比</div>
+          <div class="value" id="i-focus">0%</div>
+          <div class="bar-track"><div class="bar-fill" id="i-focus-bar"></div></div>
+        </div>
+        <div class="card">
+          <div class="label">应用切换</div>
+          <div class="value" id="i-switch">0</div>
+        </div>
+        <div class="card">
+          <div class="label">首次 / 最近活跃</div>
+          <div class="value" id="i-span" style="font-size:16px">--</div>
+        </div>
+        <div class="card">
+          <div class="label">头部应用</div>
+          <div class="value clip" id="i-top" style="font-size:16px">—</div>
+          <div class="tip" id="i-top-time"></div>
+        </div>
+      </div>
+      <div class="panel" style="flex:0 0 auto">
+        <div class="section-head"><h2>今日节奏</h2></div>
+        <div id="overview-tl" class="mini-tl"></div>
+        <div class="axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        <div class="legend">
+          <span><i style="background:#3ee08f"></i>活跃</span>
+          <span><i style="background:#6d768c"></i>离开</span>
+          <span><i style="background:#2b3142"></i>休眠</span>
+          <span id="ov-tip" hidden></span>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="section-head"><h2>分类</h2></div><div id="catPie" class="chart-box"></div></div>
+        <div class="panel"><div class="section-head"><h2>近 7 天</h2></div><div id="week" class="chart-box"></div></div>
+      </div>
+    </div>
+    <div class="page" id="page-category">
+      <div class="panel cat-strip-wrap">
+        <h2>今日分类</h2>
+        <div class="cat-total" id="catTotal">今天还没有分类记录</div>
+        <div class="cat-strip" id="catStrip"></div>
+        <div class="cat-legend" id="catLegend"></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h2>分类列表</h2>
+          <div class="scroll"><table><thead><tr><th>分类</th><th>时长</th><th>占比</th></tr></thead><tbody id="catRows"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="split-head"><h2 id="breakTitle">组成</h2></div>
+          <div class="scroll">
+            <table><thead><tr><th>应用</th><th>时长</th><th>占本类</th></tr></thead><tbody id="breakApps"></tbody></table>
+            <h2 style="margin-top:14px;">窗口标题</h2>
+            <table><thead><tr><th>应用</th><th>标题</th><th>时长</th></tr></thead><tbody id="breakTitles"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="page" id="page-apps">
+      <div class="apps-shell">
+        <div class="panel apps-summary">
+          <div><h1>应用</h1><p>今日时长</p></div>
+          <div class="apps-stat"><span class="label">最多</span><strong class="clip" id="appsTop">—</strong></div>
+          <div class="apps-stat"><span class="label">已使用</span><strong id="appsCount">0 个应用</strong></div>
+        </div>
+        <div class="app-spotlight" id="appSpotlight"></div>
+        <div class="panel app-list">
+          <div class="app-list-head"><span>排名</span><span>应用</span><span></span><span>时长</span><span>占比</span></div>
+          <div id="appList"></div>
+        </div>
+      </div>
+    </div>
+    <div class="page" id="page-timeline">
+      <div class="panel timeline-hero">
+        <div class="timeline-head">
+          <div><h2>24 小时</h2></div>
+          <div class="timeline-metrics"><div class="timeline-metric"><span>有效使用</span><strong id="timelineActive">—</strong></div><div class="timeline-metric"><span>会话</span><strong id="timelineSessions">—</strong></div><div class="timeline-metric"><span>当前</span><strong id="timelineNow">—</strong></div></div>
+        </div>
+        <div id="timeline"></div>
+        <div class="timeline-ruler"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        <div class="timeline-legend"><span><i style="background:var(--green)"></i>活跃</span><span><i style="background:var(--muted)"></i>离开</span><span><i style="background:var(--raised)"></i>休眠</span></div>
+      </div>
+      <div class="grid2 record-layout">
+        <div class="panel timeline-hourly"><div class="record-panel-head"><h2>每小时</h2></div><div id="hourly" class="chart-box"></div></div>
+        <div class="panel timeline-session"><div class="record-panel-head"><h2>最近会话</h2></div><div class="scroll"><div class="session-feed" id="sessRows"></div></div></div>
+      </div>
+    </div>
+    <div class="page" id="page-timer">
+      <div class="timer-shell">
+        <div class="panel timer-hero" id="pomoCard">
+          <div class="timer-head">
+            <h2>专注计时</h2>
+            <span class="label timer-state" id="pomoMode">未开始</span>
+          </div>
+          <div class="pomo-clock" id="pomoClock">00:00</div>
+          <p class="tip" id="pomoHint" style="margin-top:0">开始后，桌宠头顶会同步显示剩余时间。</p>
+          <div class="timer-main-actions">
+            <button type="button" id="pomoStartSaved" class="primary">开始专注</button>
+            <button type="button" id="pomoPause">暂停 / 继续</button>
+            <button type="button" id="pomoStop">结束</button>
+          </div>
+          <div class="timer-presets">
+            <span class="label">快捷开始</span>
+            <button type="button" id="pomoStart25">25 分钟 · 休息 5 分钟</button>
+            <button type="button" id="pomoStart50">50 分钟 · 休息 10 分钟</button>
+          </div>
+          <div class="timer-duration">
+            <span class="label">自定义时长</span>
+            <div class="dur-stepper">
+              <button type="button" class="dur-btn" data-target="pomoFocus" data-d="-5">−</button>
+              <input id="pomoFocus" class="dur-in" type="text" placeholder="专注" aria-label="专注时长" autocomplete="off">
+              <button type="button" class="dur-btn" data-target="pomoFocus" data-d="5">+</button>
+            </div>
+            <div class="dur-stepper">
+              <button type="button" class="dur-btn" data-target="pomoBreak" data-d="-5">−</button>
+              <input id="pomoBreak" class="dur-in" type="text" placeholder="休息" aria-label="休息时长" autocomplete="off">
+              <button type="button" class="dur-btn" data-target="pomoBreak" data-d="5">+</button>
+            </div>
+            <button type="button" id="pomoSaveCfg" class="btn">保存时长</button>
+          </div>
+          <div class="hours-hint">左边是专注，右边是休息；可直接输入“25”或“25分”。</div>
+        </div>
+        <div class="timer-subgrid">
+          <div class="panel">
+            <h2>提醒方式</h2>
+            <p class="tip">时间到后播放当前铃声，桌宠会同步显示提醒。</p>
+            <button type="button" id="soundPlay" style="align-self:flex-start">试听当前铃声</button>
+            <details class="timer-advanced">
+              <summary>测试提醒</summary>
+              <div class="pomo-actions">
+                <button type="button" id="pomoTest5">运行 5 秒测试</button>
+                <button type="button" id="pomoSimFocus">模拟专注结束</button>
+                <button type="button" id="pomoSimBreak">模拟休息结束</button>
+              </div>
+              <p class="tip" id="soundTestTip">测试不会改动统计记录。</p>
+            </details>
+          </div>
+          <div class="panel">
+            <h2>铃声</h2>
+            <p class="tip">选择内置铃声，或上传保存在本机的音频。</p>
+            <div class="sound-list" id="soundList"></div>
+            <form id="soundUp" style="margin-top:12px;display:grid;gap:8px;">
+              <input type="file" name="file" accept="audio/*,.wav,.mp3,.ogg,.m4a,.aac">
+              <button type="submit">上传并使用</button>
+            </form>
+            <div style="margin-top:8px;"><button type="button" id="soundDelete" class="btn">删除当前自定义铃声</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="page" id="page-settings">
+      <div class="panel pet-settings">
+        <div class="pet-settings-head">
+          <div>
+            <h2>桌宠个性</h2>
+            <p class="tip">保存后立即生效</p>
+          </div>
+          <button type="button" id="savePetSettings" class="primary">应用并保存</button>
+        </div>
+        <div class="pet-pack-section">
+          <div class="pet-pack-head">
+            <span class="label">角色素材</span>
+            <details class="pet-pack-import">
+              <summary>导入自己的角色</summary>
+              <form id="petPackUpload" class="pet-pack-form">
+                <label><span class="label">角色名称</span><input name="name" placeholder="例如：小蓝鲸"></label>
+                <label><span class="label">正面 PNG（必需）</span><input type="file" name="front" accept="image/png,.png" required></label>
+                <label><span class="label">侧面 PNG（可选）</span><input type="file" name="side" accept="image/png,.png"></label>
+                <label><span class="label">背面 PNG（可选）</span><input type="file" name="back" accept="image/png,.png"></label>
+                <button type="submit">导入并使用</button>
+              </form>
+              <p class="tip">透明背景效果最好。缺少侧面或背面时自动使用正面立绘，不会导致角色不可用。</p>
+            </details>
+          </div>
+          <div id="petPackList" class="pet-pack-list"></div>
+          <div class="pet-pack-actions"><button type="button" id="deletePetPack" class="btn">删除当前自定义角色</button></div>
+        </div>
+        <div class="pet-settings-grid">
+          <label class="setting-field">
+            <span class="label">行为模式</span>
+            <select id="petMode">
+              <option value="wander">自由散步</option>
+              <option value="follow">跟随鼠标</option>
+              <option value="still">原地待着</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span class="label">角色大小</span>
+            <select id="petSize">
+              <option value="小">小</option>
+              <option value="中">中</option>
+              <option value="大">大</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span class="label">说话频率</span>
+            <select id="petSpeech">
+              <option value="silent">安静</option>
+              <option value="normal">正常</option>
+              <option value="chatty">话多</option>
+            </select>
+          </label>
+          <label class="setting-field pet-lines-field">
+            <span class="label">自定义台词</span>
+            <textarea id="petLines" class="pet-lines" maxlength="4050" placeholder="一行一句；填写后会替代随机闲聊台词，留空则使用内置台词。最多 50 句，每句 80 字。"></textarea>
+          </label>
+        </div>
+        <div id="petSaveStatus" class="tip pet-save-status"></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h2>外观</h2>
+          <div class="themes">
+            <div class="swatch p-midnight" data-palette="midnight">极夜</div>
+            <div class="swatch p-daylight" data-palette="daylight">白昼</div>
+            <div class="swatch p-forest" data-palette="forest">林间</div>
+            <div class="swatch p-contrast" data-palette="contrast">高对比</div>
+          </div>
+          <p class="tip">纯色界面，更清晰</p>
+          <label class="label" style="display:flex;align-items:center;gap:8px;margin:12px 0 10px;flex-shrink:0;">
+            <input type="checkbox" id="showPet" checked style="width:auto"> 显示桌宠（软件化身，关面板后仍在桌面）
+          </label>
+          <p class="tip">桌宠设置在本页顶部</p>
+        </div>
+        <div class="panel">
+          <h2>统计规则 <span class="chart-note">高级</span></h2>
+          <textarea id="rules"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button id="saveRules">保存规则</button>
+            <button id="reclass">按新规则重算今日分类</button>
+          </div>
+          <p class="tip">内置教育站点（雨课堂、学习通、慕课等）默认算学习。B 站 / 视频站只有标题命中学科、考试、网课等关键词才算学习。自定义 JSON 只写补充词，会和内置词库合并，不会覆盖。保存后点「按新规则重算今日分类」。</p>
+        </div>
+      </div>
+      <div class="grid2" style="flex:0 0 auto">
+        <div class="panel">
+          <h2>目标与提醒</h2>
+          <p class="tip">分钟；留空关闭。左：至少，右：至多。</p>
+          <div class="goal-form" id="goalForm"></div>
+          <div class="hours-hint">例如学习填 3小时 或 180，娱乐至多填 2小时。</div>
+          <div style="margin-top:10px;"><button id="saveGoals" type="button">保存目标</button></div>
+        </div>
+        <div class="panel">
+          <h2>数据与隐私</h2>
+          <p class="tip">不计入排行与分类</p>
+          <textarea id="ignoreApps" placeholder="一行一个，例如 explorer.exe" style="min-height:120px"></textarea>
+          <label class="label" style="display:block;margin-top:10px;">最短统计时长（秒）</label>
+          <input id="ignoreMin" type="number" min="0" max="120" step="1" value="5" />
+          <p class="tip">短于此时长的窗口不计入排行</p>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button id="saveIgnore" type="button">保存忽略名单</button>
+            <button id="resetIgnore" type="button">恢复默认</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/echarts.min.js"></script>
+<script>
+var PAL = {
+  midnight: {bg:'#101419', text:'#f3f5f7', muted:'#98a5b5', card:'#171d24', raised:'#202833', field:'#0d1217', track:'#0d1217', line:'#2b3541', green:'#49c7a3', amber:'#e7ab57', blue:'#78aef8', violet:'#a894e8', 'chart-grid':'rgba(152,165,181,.14)', 'chart-text':'#98a5b5', 'chart-cell':'#101419', shadow:'rgba(0,0,0,.28)', 'on-accent':'#08231b'},
+  daylight: {bg:'#eef2f6', text:'#17212e', muted:'#607086', card:'#ffffff', raised:'#e3eaf1', field:'#f8fafc', track:'#dce5ed', line:'#ccd6e0', green:'#19795d', amber:'#a85c08', blue:'#276ecc', violet:'#715fc2', 'chart-grid':'rgba(96,112,134,.18)', 'chart-text':'#607086', 'chart-cell':'#eef2f6', shadow:'rgba(35,50,66,.10)', 'on-accent':'#ffffff'},
+  forest: {bg:'#111b16', text:'#edf7ef', muted:'#9bb4a1', card:'#18251d', raised:'#23332a', field:'#0e1711', track:'#0e1711', line:'#35483a', green:'#67c98c', amber:'#e0b862', blue:'#7bbcf2', violet:'#b9a0df', 'chart-grid':'rgba(155,180,161,.15)', 'chart-text':'#9bb4a1', 'chart-cell':'#111b16', shadow:'rgba(0,0,0,.3)', 'on-accent':'#0e2114'},
+  contrast: {bg:'#000', text:'#fff', muted:'#d0d0d0', card:'#111', raised:'#252525', field:'#000', track:'#000', line:'#666', green:'#55e3aa', amber:'#ffd166', blue:'#84b6ff', violet:'#c6b2ff', 'chart-grid':'rgba(255,255,255,.28)', 'chart-text':'#d0d0d0', 'chart-cell':'#000', shadow:'rgba(0,0,0,.7)', 'on-accent':'#000'}
+};
+var charts = {};
+var clock = null;
+var clockSkew = null;
+var lastSettings = null;
+var lastChartSig = '';
+var shownSec = {};
+var selectedCat = '';
+var lastBreakdown = {};
+var catChartsBound = false;
+var lastGoals = [];
+var lastCatSecs = {};
+var GOAL_CATS = ['学习','娱乐','工作','社交','系统','其他'];
+var CAT_COLORS = {'学习':'#5aa8ff','娱乐':'#8b7dff','工作':'#3ee08f','社交':'#f5c15d','系统':'#6d768c','其他':'#c5a7ff'};
+var lastPomo = null;
+var lastPomoEventAt = 0;
+var pomoDurDirty = false;
+var lastSounds = null;
+var lastPetPacks = null;
+function $(id){ return document.getElementById(id); }
+function tone(name){ return getComputedStyle(document.documentElement).getPropertyValue('--'+name).trim(); }
+var toastTimer = 0;
+function notice(message, error){ var el=$('toast'); if(!el) return; el.textContent=message; el.className='toast on'+(error?' error':''); clearTimeout(toastTimer); toastTimer=setTimeout(function(){el.className='toast';},3200); }
+function fmt(s){ s=Math.max(0,Math.floor(s||0)); var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60; return (h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec; }
+function tickoRuntime(name){ return /^(pcusage|pythonw|ticko)(\.exe)?$/i.test(String(name||'').trim()); }
+function appLabel(name){
+  var raw=String(name||'未知应用');
+  return tickoRuntime(raw) ? 'Ticko' : raw.replace(/\.exe$/i,'');
+}
+function displayTitle(title){
+  var value=String(title||'').trim();
+  return value.replace(/PCUsagePet|电脑使用时长统计|pcusage/ig, 'Ticko');
+}
+function appFallbackIcon(name){
+  var key=String(name||'').toLowerCase().replace(/\.exe$/,'');
+  var svg={
+    chrome:'<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#fff"/><path d="M16 2a14 14 0 0 1 12 7H16a7 7 0 0 0-6 3.5L6.5 6.4A14 14 0 0 1 16 2Z" fill="#ea4335"/><path d="M28 9a14 14 0 0 1-4 18l-6-10.4A7 7 0 0 0 16 9Z" fill="#fbbc05"/><path d="M24 27A14 14 0 0 1 6.5 6.4l6 10.4A7 7 0 0 0 18 16.6Z" fill="#34a853"/><circle cx="16" cy="16" r="6" fill="#4285f4"/></svg>',
+    chatgpt:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#10a37f"/><path d="M16 7c2.1-1.5 5.1-.2 5.4 2.4 2.5-.2 4.2 2.4 3 4.6 2.1 1.4 1.8 4.7-.5 5.7.5 2.5-2 4.7-4.4 3.8-1.5 2.1-4.7 1.8-5.7-.5-2.5.5-4.7-2-3.8-4.4-2.1-1.5-1.8-4.7.5-5.7-.5-2.5 2-4.7 4.4-3.8.3-.8.7-1.5 1.3-2.1Z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>',
+    weixin:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#07c160"/><circle cx="13" cy="14" r="7" fill="#fff"/><circle cx="21" cy="20" r="6" fill="#fff"/><circle cx="11" cy="13" r="1" fill="#07c160"/><circle cx="15" cy="13" r="1" fill="#07c160"/><circle cx="19" cy="19" r="1" fill="#07c160"/><circle cx="22" cy="19" r="1" fill="#07c160"/></svg>',
+    code:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1976d2"/><path d="m9 11-4 5 4 5m14-10 4 5-4 5M18 8l-4 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    doubao:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3b7cff"/><path d="M9 11.5C12 8 20 8 23 11.5v9C20 24 12 24 9 20.5Z" fill="none" stroke="#fff" stroke-width="2"/><path d="M12 16h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+    bilibili:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#fb7299"/><rect x="7" y="10" width="18" height="13" rx="4" fill="none" stroke="#fff" stroke-width="2"/><path d="m11 7 3 3m7-3-3 3M12 15l2 2 2-2m2 0 2 2 2-2" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    thunder:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2878ff"/><path d="m18 4-9 14h6l-1 10 9-15h-6Z" fill="#fff"/></svg>',
+    winrar:'<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#754aa0"/><path d="M7 8h18v5H7zm0 6h18v5H7zm0 6h18v4H7z" fill="#d9b5ef"/><path d="M10 8h3v15h-3z" fill="#63407c"/></svg>'
+  };
+  if(svg[key]) return svg[key];
+  var initials=appLabel(name).replace(/[^\w\u4e00-\u9fff]/g,'').slice(0,2).toUpperCase()||'?';
+  return esc(initials);
+}
+function appIcon(name){
+  if(tickoRuntime(name)) return '<img class="app-icon-image" src="/app/icon.png" alt="">';
+  var source='/api/app-icon?name='+encodeURIComponent(String(name||''));
+  return '<img class="app-icon-image" src="'+source+'" alt="" onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.app-fallback\').hidden=false"><span class="app-fallback" hidden>'+appFallbackIcon(name)+'</span>';
+}
+function stepSec(key, target){
+  target = Math.max(0, Math.floor(target||0));
+  var cur = shownSec[key];
+  if(cur==null){ shownSec[key]=target; return target; }
+  if(target < cur - 2){ shownSec[key]=target; return target; }
+  if(target > cur + 3){ shownSec[key]=target-1; return shownSec[key]; }
+  if(target > cur) shownSec[key] = cur + 1;
+  return shownSec[key];
+}
+function clockTime(ts){ if(!ts) return '--'; return new Date(ts*1000).toTimeString().slice(0,8); }
+function esc(t){ return String(t==null?'':t).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function stateName(s){ return s==='active'?'活跃':(s==='away'?'离开':(s==='sleep'?'休眠':s||'')); }
+function applyClockSnap(c){
+  if(!c) return;
+  var measured = Date.now()/1000 - (c.server_ts || (Date.now()/1000));
+  if(clockSkew===null || Math.abs(measured - clockSkew) > 2) clockSkew = measured;
+  if(!clock) clock = {};
+  clock.serverTs = c.server_ts;
+  clock.liveStart = c.live_start;
+  clock.state = c.live_state || 'active';
+  clock.liveApp = c.live_app || '';
+  clock.liveTitle = c.live_title || '';
+  clock.liveCat = c.live_category || '';
+  clock.activeClosed = c.active_closed || 0;
+  clock.awayClosed = c.away_closed || 0;
+  clock.systemClosed = c.system_closed || 0;
+  if(typeof c.sleep_closed === 'number') clock.sleepClosed = c.sleep_closed;
+  if(clock.sleepClosed==null) clock.sleepClosed = 0;
+  clock.appClosed = c.app_closed || 0;
+  clock.catClosed = c.cat_closed || 0;
+  clock.idleSeconds = c.idle_seconds || 0;
+  clock.awayIn = c.away_in_seconds || 0;
+}
+function serverNow(){ return Date.now()/1000 - (clockSkew||0); }
+function liveElapsed(){
+  if(!clock || clock.liveStart==null) return 0;
+  return Math.max(0, serverNow() - clock.liveStart);
+}
+function painted(){
+  if(!clock) return;
+  var el = liveElapsed();
+  var a = clock.activeClosed, w = clock.awayClosed, sys = clock.systemClosed, sl = clock.sleepClosed||0;
+  if(clock.state==='active'){ a += el; sys += el; }
+  else if(clock.state==='away'){ w += el; sys += el; }
+  $('c-active').textContent = fmt(stepSec('active', a));
+  $('c-away').textContent = fmt(stepSec('away', w));
+  $('c-system').textContent = fmt(stepSec('system', sys));
+  $('c-sleep').textContent = fmt(stepSec('sleep', sl));
+  var liveEnd = $('live-end');
+  var liveDur = $('live-dur');
+  if(liveEnd) liveEnd.textContent = clockTime(Date.now()/1000);
+  if(liveDur) liveDur.textContent = fmt(stepSec('sess', el));
+  var liveApp = $('live-app-sec');
+  if(liveApp && clock.state==='active') liveApp.textContent = fmt(stepSec('app', clock.appClosed + el));
+  var liveCat = $('live-cat-sec');
+  if(liveCat && clock.state==='active') liveCat.textContent = fmt(stepSec('cat', clock.catClosed + el));
+  var nowSess = $('now-sess');
+  if(nowSess) nowSess.textContent = fmt(stepSec('nowSess', el));
+  var nowIdle = $('now-idle');
+  if(nowIdle){
+    if(clock.state==='active'){
+      var passed = Math.max(0, serverNow() - (clock.serverTs||serverNow()));
+      nowIdle.textContent = fmt(Math.max(0, (clock.awayIn||0) - passed));
+    } else nowIdle.textContent = '已离开';
+  }
+  var nowLong = $('now-longest');
+  if(nowLong){
+    var ls = clock.longestClosed || 0;
+    if(clock.state==='active') ls = Math.max(ls, el);
+    nowLong.textContent = fmt(ls);
+  }
+  var iFocus = $('i-focus');
+  if(iFocus && sys > 0){
+    var ratio = Math.max(0, Math.min(100, Math.round(1000 * a / sys) / 10));
+    iFocus.textContent = ratio + '%';
+    if($('brief-focus')) $('brief-focus').textContent = ratio + '%';
+    var bar = $('i-focus-bar');
+    if(bar) bar.style.width = ratio + '%';
+  }
+  if($('now-app')){
+    $('now-app').textContent = appLabel(clock.liveApp || '无焦点');
+    $('now-title').textContent = displayTitle(clock.liveTitle || '');
+    $('now-state').textContent = stateName(clock.state);
+  }
+  if($('live') && $('live').textContent.indexOf('服务未连接')!==0){
+    $('live').textContent=(clock.state==='active'?'活跃':'离开')+' · '+(clock.liveCat||'')+' · '+appLabel(clock.liveApp||'无焦点')+(clock.liveTitle?' · '+displayTitle(clock.liveTitle):'');
+  }
+  paintGoalCards(a);
+}
+function parseDurText(val){
+  if(val==null) return null;
+  var text = String(val).trim();
+  if(!text) return null;
+  text = text.replace(/小时/g,'h').replace(/钟头/g,'h').replace(/时/g,'h').replace(/分钟/g,'m').replace(/分/g,'m').replace(/秒/g,'s');
+  text = text.replace(/\s+/g,'').toLowerCase();
+  var hm = /^(\d+):(\d{1,2})(?::(\d{1,2}))?$/.exec(text);
+  if(hm){
+    var hh=parseInt(hm[1],10), mm=parseInt(hm[2],10), ss=parseInt(hm[3]||'0',10);
+    if(mm>=60 || ss>=60) return null;
+    return hh*3600 + mm*60 + ss;
+  }
+  var hm2 = /^(\d+(?:\.\d+)?)h(\d+(?:\.\d+)?)m?$/.exec(text);
+  if(hm2) return Math.round(parseFloat(hm2[1])*3600 + parseFloat(hm2[2])*60);
+  var ho = /^(\d+(?:\.\d+)?)h$/.exec(text);
+  if(ho) return Math.round(parseFloat(ho[1])*3600);
+  var mo = /^(\d+(?:\.\d+)?)m$/.exec(text);
+  if(mo) return Math.round(parseFloat(mo[1])*60);
+  var so = /^(\d+(?:\.\d+)?)s$/.exec(text);
+  if(so) return Math.round(parseFloat(so[1]));
+  var n = parseFloat(text);
+  if(!isFinite(n) || n<0) return null;
+  if(text.indexOf('.')>=0) return Math.round(n*3600);
+  return Math.round(n)*60;
+}
+function secFromDurInput(el){
+  var s = parseDurText(el && el.value);
+  if(s==null || s<=0) return null;
+  return s;
+}
+function formatDurText(sec){
+  if(sec==null || sec==='') return '';
+  var s = Math.round(Number(sec));
+  if(!isFinite(s) || s<=0) return '';
+  var h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  if(h && m) return h+'小时'+m+'分';
+  if(h) return h+'小时';
+  return m+'分';
+}
+function fmtHuman(s){
+  s=Math.max(0,Math.floor(s||0));
+  var h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  if(h && m) return h+'小时'+m+'分';
+  if(h) return h+'小时';
+  return m+'分';
+}
+function stepDurField(el, deltaMin){
+  if(!el) return;
+  var cur = parseDurText(el.value);
+  if(cur==null) cur = 0;
+  var next = cur + deltaMin*60;
+  if(next<0) next = 0;
+  el.value = next ? formatDurText(next) : '';
+}
+function durHtml(id, ph){
+  return '<div class="dur-stepper"><button type="button" class="dur-btn" data-target="'+id+'" data-d="-5">−</button><input id="'+id+'" class="dur-in" type="text" placeholder="'+ph+'" autocomplete="off"><button type="button" class="dur-btn" data-target="'+id+'" data-d="5">+</button></div>';
+}
+function buildGoalForm(){
+  var box = $('goalForm');
+  if(!box || box.getAttribute('data-ready')) return;
+  var rows = [['active','活跃']].concat(GOAL_CATS.map(function(n){ return [n, n]; }));
+  box.innerHTML = rows.map(function(p){
+    return '<div class="goal-row"><span class="label">'+p[1]+'</span>'+durHtml('g-'+p[0]+'-min','至少')+durHtml('g-'+p[0]+'-max','至多')+'</div>';
+  }).join('');
+  box.setAttribute('data-ready','1');
+}
+function bindDurSteppers(){
+  document.querySelectorAll('.dur-btn').forEach(function(btn){
+    btn.onclick=function(){
+      var id = btn.getAttribute('data-target');
+      stepDurField($(id), parseInt(btn.getAttribute('data-d'),10));
+      if(id==='pomoFocus' || id==='pomoBreak') pomoDurDirty = true;
+    };
+  });
+}
+function fillPomoDur(p){
+  if(pomoDurDirty) return;
+  var ae = document.activeElement;
+  if(ae && (ae.id==='pomoFocus' || ae.id==='pomoBreak')) return;
+  if($('pomoFocus')) $('pomoFocus').value = formatDurText((p.focus_min||25)*60);
+  if($('pomoBreak')) $('pomoBreak').value = formatDurText((p.break_min||5)*60);
+}
+function fmtMmSs(s){
+  s=Math.max(0,Math.floor(s||0));
+  var m=Math.floor(s/60), sec=s%60;
+  return (m<10?'0':'')+m+':'+((sec<10?'0':'')+sec);
+}
+function pomoModeText(mode){
+  if(mode==='focus') return '专注中';
+  if(mode==='break') return '休息中';
+  if(mode==='paused') return '已暂停';
+  return '未开始';
+}
+function paintPomodoro(p){
+  p = p || lastPomo || {mode:'idle', remain:0, focus_min:25, break_min:5};
+  lastPomo = p;
+  var running = p.mode==='focus' || p.mode==='break' || p.mode==='paused';
+  var clock = fmtMmSs(p.remain||0);
+  if($('pomoClock')) $('pomoClock').textContent = running ? clock : '00:00';
+  if($('pomoMode')) $('pomoMode').textContent = pomoModeText(p.mode);
+  var banner = $('pomoBanner');
+  if(banner){
+    banner.classList.toggle('on', running);
+    if($('pomoBannerClock')) $('pomoBannerClock').textContent = clock;
+    if($('pomoBannerLabel')) $('pomoBannerLabel').textContent = '番茄钟 · '+pomoModeText(p.mode);
+  }
+  if($('pomoHint')){
+    $('pomoHint').textContent = running ? ((p.label||pomoModeText(p.mode))+' · 桌宠头顶同步显示') : '开始后，这里和桌宠头顶都会倒计时。时间到会响铃。';
+  }
+  if(p.last_event_at && p.last_event_at !== lastPomoEventAt){
+    lastPomoEventAt = p.last_event_at;
+    if(p.last_event && $('pomoCard')){
+      $('pomoCard').classList.remove('pomo-flash');
+      void $('pomoCard').offsetWidth;
+      $('pomoCard').classList.add('pomo-flash');
+    }
+  }
+  fillPomoDur(p);
+}
+function pomoPost(body){
+  return fetch('/api/pomodoro',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})}).then(function(r){ return r.json(); }).then(function(j){
+    paintPomodoro((j && j.pomodoro) || j);
+    return j;
+  });
+}
+function pollPomo(){
+  jsonGet('/api/pomodoro', lastPomo).then(function(p){ if(p && p.mode) paintPomodoro(p); });
+}
+function readPomoMin(id, fallback){
+  var sec = parseDurText($(id) && $(id).value);
+  if(sec==null || sec<=0) return fallback;
+  return Math.max(1, Math.round(sec/60));
+}
+function renderSoundList(data){
+  lastSounds = data || lastSounds;
+  var box = $('soundList');
+  if(!box) return;
+  var items = (lastSounds && lastSounds.items) || [];
+  box.innerHTML = items.length ? items.map(function(s){
+    return '<button type="button" class="sound-chip'+(s.selected?' on':'')+'" data-sid="'+esc(s.id)+'">'+esc(s.name)+(s.builtin?'':' · 自定义')+'</button>';
+  }).join('') : '还没有铃声';
+}
+function loadSounds(){
+  jsonGet('/api/sounds', lastSounds || {items:[]}).then(function(d){ renderSoundList(d); });
+}
+function soundPost(body){
+  return fetch('/api/sounds',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})}).then(function(r){ return r.json(); }).then(function(j){
+    if(j && j.sounds) renderSoundList(j.sounds);
+    return j;
+  });
+}
+function goalKindLabel(kind){ return kind==='max' ? '上限' : '至少'; }
+function goalStatusText(g){
+  if(g.status==='done') return '已达成';
+  if(g.status==='over') return '已超出';
+  if(g.status==='near') return g.kind==='max' ? '接近上限' : '接近达成';
+  return g.kind==='max' ? '上限内' : '进行中';
+}
+function paintGoalCards(activeNow){
+  var box = $('goalPanel');
+  if(!box) return;
+  document.querySelectorAll('.goal-card').forEach(function(el){
+    var id = el.getAttribute('data-id');
+    var g = null;
+    for(var i=0;i<lastGoals.length;i++){ if(lastGoals[i].id===id){ g=lastGoals[i]; break; } }
+    if(!g) return;
+    var target = Number(g.target||0);
+    var cur = Number(g.current||0);
+    if(g.id.indexOf('active')===0) cur = activeNow;
+    else if(g.label && lastCatSecs[g.label]!=null){
+      cur = lastCatSecs[g.label]||0;
+      if(clock && clock.state==='active' && clock.liveCat===g.label){
+        cur = (clock.catClosed||0) + liveElapsed();
+      }
+    }
+    var ratio = target ? (cur/target) : 0;
+    var status = 'ok';
+    if(g.kind==='min'){
+      if(cur>=target) status='done';
+      else if(ratio>=0.9) status='near';
+    } else {
+      if(cur>target) status='over';
+      else if(ratio>=0.9) status='near';
+    }
+    el.className = 'card goal-card '+status;
+    var val = el.querySelector('.goal-now');
+    var bar = el.querySelector('.bar-fill');
+    var tip = el.querySelector('.goal-status');
+    if(val) val.textContent = fmt(cur)+' / '+fmt(target);
+    if(bar) bar.style.width = Math.max(0, Math.min(100, ratio*100))+'%';
+    if(tip) tip.textContent = goalKindLabel(g.kind)+' · '+goalStatusText({kind:g.kind,status:status});
+  });
+}
+function renderGoalPanel(items){
+  lastGoals = items || [];
+  var box = $('goalPanel');
+  if(!box) return;
+  box.classList.toggle('single', lastGoals.length <= 1);
+  if(!lastGoals.length){
+    box.innerHTML = '<div class="card"><div class="label">今日目标</div><div class="tip">还没有设置目标。打开设置页或右键桌宠，按分钟填写活跃 / 学习 / 娱乐等即可。全部在本机保存。</div></div>';
+    return;
+  }
+  box.innerHTML = lastGoals.map(function(g){
+    var pct = Math.max(0, Math.min(100, (g.bar||0)*100));
+    return '<div class="card goal-card '+(g.status||'')+'" data-id="'+esc(g.id)+'"><div class="label">'+esc(g.label)+' · '+goalKindLabel(g.kind)+'</div><div class="value goal-now">'+fmt(g.current)+' / '+fmt(g.target)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div><div class="tip goal-status">'+goalStatusText(g)+'</div></div>';
+  }).join('');
+}
+function fillGoalForm(goals){
+  goals = goals || {active:{min:null,max:null}, categories:{}};
+  function setPair(prefix, pair){
+    pair = pair || {};
+    var a = $(prefix+'-min'), b = $(prefix+'-max');
+    if(a && document.activeElement !== a) a.value = formatDurText(pair.min);
+    if(b && document.activeElement !== b) b.value = formatDurText(pair.max);
+  }
+  setPair('g-active', goals.active);
+  GOAL_CATS.forEach(function(name){
+    setPair('g-'+name, (goals.categories||{})[name]);
+  });
+}
+function readGoalForm(){
+  function pair(prefix){
+    return { min: secFromDurInput($(prefix+'-min')), max: secFromDurInput($(prefix+'-max')) };
+  }
+  var categories = {};
+  GOAL_CATS.forEach(function(name){ categories[name] = pair('g-'+name); });
+  return { active: pair('g-active'), categories: categories };
+}
+function fillIgnoreForm(settings){
+  if($('ignoreApps') && document.activeElement !== $('ignoreApps')){
+    $('ignoreApps').value = ((settings && settings.ignore_apps) || []).join('\n');
+  }
+  if($('ignoreMin') && document.activeElement !== $('ignoreMin')){
+    var n = settings && settings.ignore_min_seconds;
+    $('ignoreMin').value = (n==null || n==='') ? 5 : n;
+  }
+}
+function renderPetPacks(data){
+  lastPetPacks = data || lastPetPacks || {selected:'default',items:[]};
+  var box = $('petPackList');
+  if(!box) return;
+  var selected = lastPetPacks.selected || 'default';
+  box.innerHTML = (lastPetPacks.items||[]).map(function(p){
+    return '<button type="button" class="pet-pack-card'+(p.id===selected?' on':'')+'" data-pet-pack="'+esc(p.id)+'" title="切换到 '+esc(p.name)+'"><img src="'+esc(p.preview)+'" alt=""><span>'+esc(p.name)+'</span></button>';
+  }).join('');
+  var del = $('deletePetPack');
+  if(del) del.disabled = selected==='default';
+}
+function loadPetPacks(){
+  jsonGet('/api/pets', lastPetPacks || {selected:'default',items:[]}).then(renderPetPacks);
+}
+function petPackPost(body){
+  return fetch('/api/pets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){
+    return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'操作失败'); return j; });
+  }).then(function(j){ renderPetPacks(j.pets); refresh(); return j; });
+}
+function fillPetSettings(settings){
+  settings = settings || {};
+  var fields = [
+    ['petMode', settings.pet_mode || 'wander'],
+    ['petSize', settings.pet_size || '小'],
+    ['petSpeech', settings.pet_speech || 'normal']
+  ];
+  fields.forEach(function(pair){
+    var el = $(pair[0]);
+    if(el && document.activeElement !== el) el.value = pair[1];
+  });
+  var lines = $('petLines');
+  if(lines && document.activeElement !== lines){
+    lines.value = (settings.pet_lines || []).join('\n');
+  }
+}
+function dayBarTip(seg){
+  return (seg.category||'')+' · '+appLabel(seg.app||'无焦点')+' · '+clockTime(seg.start)+' - '+clockTime(seg.end)+' · '+fmt(seg.end-seg.start)+(seg.title?' · '+displayTitle(seg.title):'');
+}
+function drawDayBar(box, tl, tipId){
+  if(!box) return;
+  box.innerHTML = '';
+  var tip = tipId ? $(tipId) : null;
+  (tl.segments||[]).forEach(function(seg){
+    var left=(seg.start-tl.day_start)/86400*100, width=(seg.end-seg.start)/86400*100;
+    if(width<=0||left>100) return;
+    left=Math.max(0,Math.min(100,left)); width=Math.max(0.15,Math.min(100-left,width));
+    var el=document.createElement('div');
+    el.className='seg '+(seg.state==='active'?'seg-active':(seg.state==='away'?'seg-away':'seg-sleep'));
+    if(seg.state==='active' && seg.category) el.style.background=CAT_COLORS[seg.category] || '#49c7a3';
+    el.style.left=left+'%'; el.style.width=width+'%';
+    if(tip) el.onmouseenter=function(){ tip.textContent=dayBarTip(seg); };
+    el.onclick=function(){ location.hash='#timeline'; if(tip) tip.textContent=dayBarTip(seg); };
+    box.appendChild(el);
+  });
+}
+function applyPalette(name){
+  var p = PAL[name] || PAL.midnight;
+  var r = document.documentElement.style;
+  Object.keys(p).forEach(function(k){ r.setProperty('--'+k, p[k]); });
+  document.documentElement.setAttribute('data-palette', name || 'midnight');
+  lastChartSig = '';
+  document.querySelectorAll('.swatch').forEach(function(el){ el.classList.toggle('on', el.getAttribute('data-palette')===name); });
+}
+function applyAppearance(settings){
+  settings = settings || {};
+  if($('showPet') && document.activeElement !== $('showPet')){
+    $('showPet').checked = settings.show_pet !== false;
+  }
+  fillGoalForm(settings.daily_goals);
+  fillIgnoreForm(settings);
+  fillPetSettings(settings);
+}
+function selectCategory(name){
+  if(!name) return;
+  selectedCat = name;
+  document.querySelectorAll('#catRows tr').forEach(function(tr){
+    tr.classList.toggle('on', tr.getAttribute('data-cat')===name);
+  });
+  var pack = lastBreakdown[name] || {apps:[], titles:[]};
+  if($('breakTitle')) $('breakTitle').textContent = name + ' · 组成';
+  if($('breakApps')){
+    $('breakApps').innerHTML = pack.apps.length ? pack.apps.map(function(x){
+      return '<tr><td>'+esc(appLabel(x.name))+'</td><td>'+x.fmt+'</td><td>'+x.percent+'%</td></tr>';
+    }).join('') : '<tr><td colspan="3">这一类今天还没有记录</td></tr>';
+  }
+  if($('breakTitles')){
+    $('breakTitles').innerHTML = pack.titles.length ? pack.titles.map(function(x){
+      return '<tr><td>'+esc(appLabel(x.app))+'</td><td class="clip">'+esc(displayTitle(x.title))+'</td><td>'+x.fmt+'</td></tr>';
+    }).join('') : '<tr><td colspan="3">暂无窗口标题</td></tr>';
+  }
+}
+function bindCatCharts(){
+  if(catChartsBound) return;
+  catChartsBound = true;
+  chart('catPie').on('click', function(p){
+    if(p && p.name){ selectCategory(p.name); location.hash = '#category'; }
+  });
+}
+function renderCatStrip(cats){
+  var strip = $('catStrip'), legend = $('catLegend'), totalEl = $('catTotal');
+  if(!strip) return;
+  var items = (cats||[]).filter(function(x){ return (x.seconds||0) > 0; });
+  var total = 0;
+  items.forEach(function(x){ total += x.seconds||0; });
+  if(totalEl) totalEl.textContent = total ? ('今日合计 '+fmtHuman(total)+'（'+fmt(total)+'）') : '今天还没有分类记录';
+  strip.innerHTML = '';
+  if(legend) legend.innerHTML = '';
+  if(!items.length){
+    strip.style.display = 'none';
+    return;
+  }
+  strip.style.display = 'flex';
+  items.forEach(function(x){
+    var pct = total ? (x.seconds/total)*100 : 0;
+    var seg = document.createElement('div');
+    seg.className = 'cat-seg';
+    seg.style.width = Math.max(1.2, pct)+'%';
+    seg.style.background = CAT_COLORS[x.name] || '#8b7dff';
+    seg.title = x.name+' · '+(x.fmt||fmt(x.seconds))+' · '+(x.percent!=null?x.percent:Math.round(pct))+'%';
+    seg.setAttribute('data-cat', x.name);
+    if(pct >= 12) seg.textContent = x.name;
+    strip.appendChild(seg);
+  });
+  if(legend){
+    legend.innerHTML = items.map(function(x){
+      var pct = Math.max(0, Math.min(100, Number(x.percent)||0));
+      var col = CAT_COLORS[x.name] || '#8b7dff';
+      return '<div class="cat-leg" data-cat="'+esc(x.name)+'"><i style="background:'+col+'"></i><span>'+esc(x.name)+'</span><span>'+esc(x.fmt)+'</span><span>'+pct+'%</span><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
+    }).join('');
+  }
+}
+function showPage(){
+  var id = (location.hash||'#overview').slice(1);
+  if(!$('page-'+id)) id='overview';
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.toggle('on', p.id==='page-'+id); });
+  document.querySelectorAll('.nav a').forEach(function(a){ a.classList.toggle('on', a.getAttribute('data-page')===id); });
+  setTimeout(resize, 30);
+}
+function chart(id){
+  if(!charts[id]){
+    var el = $(id);
+    if(!el) return { setOption:function(){}, resize:function(){}, on:function(){} };
+    charts[id]=echarts.init(el);
+  }
+  return charts[id];
+}
+function resize(){ Object.keys(charts).forEach(function(k){ charts[k].resize(); }); }
+function saveScroll(){
+  var map = {};
+  document.querySelectorAll('.scroll').forEach(function(el, i){ map[i] = el.scrollTop; });
+  return map;
+}
+function restoreScroll(map){
+  document.querySelectorAll('.scroll').forEach(function(el, i){ if(map[i]) el.scrollTop = map[i]; });
+}
+function render(d, settings){
+  var scrolls = saveScroll();
+  if(d.clock) applyClockSnap(d.clock);
+  var liveAppName = (clock && clock.state==='active') ? (clock.liveApp||'') : '';
+  var liveCatName = (clock && clock.state==='active') ? (clock.liveCat||'') : '';
+  var longestClosed = 0, longestApp = '';
+  ((d.timeline && d.timeline.segments) || []).forEach(function(seg){
+    if(seg.state!=='active' || seg.live) return;
+    var dur = Math.max(0, (seg.end||0)-(seg.start||0));
+    if(dur > longestClosed){
+      longestClosed = dur;
+      longestApp = seg.app||'';
+    }
+  });
+  if(clock){
+    clock.longestClosed = longestClosed;
+    if(!clock.liveApp && longestApp) clock.longestApp = longestApp;
+  }
+  if($('now-longest-app')) $('now-longest-app').textContent = appLabel(longestApp || (clock && clock.liveApp) || '暂无');
+  if($('i-switch')){
+    $('i-switch').textContent = d.app_switches || 0;
+    $('i-span').textContent = clockTime(d.first_active)+' – '+clockTime(d.last_active);
+    $('i-top').textContent = d.top_app ? appLabel(d.top_app.name) : '—';
+    $('i-top-time').textContent = d.top_app ? d.top_app.fmt : '';
+  }
+  if($('brief-switch')) $('brief-switch').textContent = (d.app_switches || 0) + ' 次';
+  if($('brief-span')) $('brief-span').textContent = clockTime(d.first_active)+' – '+clockTime(d.last_active);
+  lastCatSecs = {};
+  (d.categories||[]).forEach(function(x){ lastCatSecs[x.name] = x.seconds||0; });
+  renderGoalPanel(d.goals_progress||[]);
+  var cats=d.categories||[];
+  renderCatStrip(cats);
+  var pieCats = cats.filter(function(x){ return (x.seconds||0) > 0; });
+  var sig = JSON.stringify({
+    c: cats.map(function(x){ return [x.name, Math.round(x.seconds||0)]; }),
+    w: d.week,
+    a: (d.apps||[]).map(function(x){ return [x.name, x.seconds]; }),
+    h: d.hourly
+  });
+  var chartsDirty = sig !== lastChartSig;
+  lastChartSig = sig;
+  if(chartsDirty){
+    var chartText=tone('chart-text'), chartGrid=tone('chart-grid'), chartBlue=tone('blue'), chartGreen=tone('green'), chartCell=tone('chart-cell');
+    var axisStyle = {axisLine:{lineStyle:{color:chartGrid}},axisLabel:{color:chartText}};
+    chart('catPie').setOption({
+      backgroundColor:'transparent', grid:{left:12,right:44,top:6,bottom:6,containLabel:true},
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:function(p){ var x=p&&p[0]; return x ? esc(x.name)+'<br>'+fmt(x.value)+' · '+Math.round((x.value/(pieCats.reduce(function(s,i){return s+i.seconds;},0)||1))*100)+'%' : ''; }},
+      xAxis:{type:'value',show:false}, yAxis:{type:'category',inverse:true,data:pieCats.map(function(x){return x.name;}),axisTick:{show:false},axisLine:{show:false},axisLabel:{color:tone('text')}},
+      series:[{type:'bar',data:pieCats.map(function(x){return {value:x.seconds,itemStyle:{color:CAT_COLORS[x.name]||tone('violet')}};}),barWidth:16,itemStyle:{borderRadius:[0,8,8,0]},label:{show:true,position:'right',color:chartText,formatter:function(p){return fmt(p.value);}}}]
+    }, true);
+    chart('week').setOption({
+      backgroundColor:'transparent', grid:{left:10,right:12,top:30,bottom:8,containLabel:true},
+      tooltip:{trigger:'axis',formatter:function(ps){ if(!ps||!ps.length) return ''; var day=ps[0].axisValue; var out=[day]; ps.forEach(function(p){ out.push(p.marker+p.seriesName+'：'+(p.seriesName==='专注占比'?Math.round(p.value)+'%':fmt(p.value))); }); return out.join('<br>'); }}, legend:{data:['有效使用','专注占比'], textStyle:{color:chartText},right:0},
+      xAxis:{type:'category',data:(d.week||[]).map(function(x){return x.date.slice(5);}),axisTick:{show:false},axisLine:axisStyle.axisLine,axisLabel:axisStyle.axisLabel},
+      yAxis:[{type:'value',axisLabel:{color:chartText,formatter:function(v){return Math.round(v/3600)+'h';}},splitLine:{lineStyle:{color:chartGrid} }},{type:'value',min:0,max:100,show:false}],
+      series:[
+        {name:'有效使用',type:'bar',data:(d.week||[]).map(function(x){return x.active;}),barMaxWidth:28,itemStyle:{color:chartGreen,borderRadius:[5,5,0,0]}},
+        {name:'专注占比',type:'line',yAxisIndex:1,smooth:true,symbolSize:6,data:(d.week||[]).map(function(x){return x.system ? Math.round((x.active/x.system)*100) : 0;}),lineStyle:{color:chartBlue,width:2},itemStyle:{color:chartBlue}}
+      ]
+    }, true);
+    bindCatCharts();
+  }
+  lastBreakdown = d.category_breakdown || {};
+  $('catRows').innerHTML = cats.length ? cats.map(function(x){
+    var id = (x.name===liveCatName) ? ' id="live-cat-sec"' : '';
+    return '<tr data-cat="'+esc(x.name)+'"><td>'+esc(x.name)+'</td><td'+id+'>'+x.fmt+'</td><td>'+x.percent+'%</td></tr>';
+  }).join('') : '<tr><td colspan="3">暂无</td></tr>';
+  if(!selectedCat){
+    var first = cats.filter(function(x){ return (x.seconds||0)>0; })[0];
+    selectedCat = first ? first.name : '娱乐';
+  }
+  selectCategory(selectedCat);
+  var apps=d.apps||[];
+  if($('appsTop')) $('appsTop').textContent = apps.length ? appLabel(apps[0].name) : '—';
+  if($('appsCount')) $('appsCount').textContent = apps.length + ' 个应用';
+  if($('appSpotlight')){
+    $('appSpotlight').innerHTML = apps.slice(0,3).map(function(x){
+      return '<div class="card spot-card"><span class="spot-rank">TOP '+x.rank+'</span><span class="app-ident"><span class="app-icon">'+appIcon(x.name)+'</span><span class="spot-name">'+esc(appLabel(x.name))+'</span></span><span class="spot-time">'+esc(x.fmt)+'</span></div>';
+    }).join('');
+  }
+  if($('appList')){
+    $('appList').innerHTML = apps.length ? apps.map(function(x){
+      var pct=Math.max(0,Math.min(100,Number(x.percent)||0));
+      var live=x.name===liveAppName ? ' style="box-shadow:inset 3px 0 0 var(--green)"' : '';
+      return '<div class="app-row"'+live+' title="'+esc(x.name)+' · '+esc(x.fmt)+'"><div class="app-rank">'+x.rank+'</div><div class="app-ident"><span class="app-icon">'+appIcon(x.name)+'</span><span class="app-name">'+esc(appLabel(x.name))+'</span></div><div class="app-bar"><b style="width:'+pct+'%"></b></div><div class="app-duration">'+esc(x.fmt)+'</div><div class="app-share">'+pct+'%</div></div>';
+    }).join('') : '<div class="app-empty">今天还没有可统计的应用记录。</div>';
+  }
+  var tl=d.timeline||{day_start:0,segments:[]};
+  drawDayBar($('timeline'), tl, null);
+  drawDayBar($('overview-tl'), tl, 'ov-tip');
+  if($('timelineActive')) $('timelineActive').textContent = (d.today && d.today.active_fmt) || '—';
+  if($('timelineSessions')) $('timelineSessions').textContent = (d.sessions||[]).length + ' 条';
+  if($('timelineNow')) $('timelineNow').textContent = liveAppName ? appLabel(liveAppName) : '离开';
+  if(chartsDirty){
+    var h=d.hourly||{active:[],away:[],sleep:[]};
+    var hours=[]; for(var i=0;i<24;i++) hours.push((i<10?'0':'')+i);
+    chart('hourly').setOption({
+      backgroundColor:'transparent',
+      grid:{left:2,right:2,top:14,bottom:28,containLabel:true},
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:function(p){ var x=p&&p[0]; return x ? x.axisValue+':00<br>有效使用 '+fmt(x.value) : ''; }},
+      xAxis:{type:'category',data:hours,axisTick:{show:false},axisLine:{lineStyle:{color:chartGrid}},axisLabel:{color:chartText,interval:function(i){return i%3!==0;}}},
+      yAxis:{type:'value',show:false,max:function(v){ return Math.max(900, Math.ceil(v.max/900)*900); }},
+      series:[{type:'bar',data:hours.map(function(x,i){return (h.active||[])[i]||0;}),barMaxWidth:22,showBackground:true,backgroundStyle:{color:chartCell,borderRadius:[6,6,0,0]},itemStyle:{borderRadius:[6,6,0,0],color:function(p){ return p.value>=1800 ? chartGreen : chartBlue; }},label:{show:true,position:'top',color:chartText,fontSize:10,formatter:function(p){return p.value>=900?Math.round(p.value/60)+'m':'';}}}]
+    }, true);
+  }
+  $('sessRows').innerHTML=(d.sessions||[]).map(function(r){
+    var endCell = r.live ? '<span id="live-end">'+clockTime(r.end)+'</span> · 进行中' : clockTime(r.end);
+    var durCell = r.live ? '<span id="live-dur">'+r.fmt+'</span>' : r.fmt;
+    var state = r.state==='active'?'active':(r.state==='away'?'away':'sleep');
+    return '<article class="session-row"><div class="session-time"><span class="session-state '+state+'"></span>'+clockTime(r.start)+' – '+endCell+'</div><div class="session-app-cell"><span class="app-icon">'+appIcon(r.app||'')+'</span><span>'+esc(appLabel(r.app||''))+'</span></div><div class="session-title">'+esc(displayTitle(r.title||'—'))+'</div><div class="session-duration">'+durCell+'</div></article>';
+  }).join('') || '<div class="app-empty">暂无会话</div>';
+  restoreScroll(scrolls);
+  painted();
+  if(chartsDirty) setTimeout(resize, 40);
+}
+function jsonGet(url, fallback){
+  return fetch(url).then(function(r){
+    if(!r.ok) throw new Error(url+' '+r.status);
+    return r.json();
+  }).catch(function(){ return fallback; });
+}
+function pollClock(){
+  jsonGet('/api/clock', null).then(function(c){
+    if(c && c.server_ts) applyClockSnap(c);
+  });
+}
+function refresh(){
+  jsonGet('/api/dashboard', null).then(function(d){
+    if(!d || !d.today){
+      notice('服务未连接：请通过 Ticko 桌面应用启动', true);
+      return;
+    }
+    jsonGet('/api/settings', lastSettings || {palette:'midnight', overlay:0.28, themes:[]}).then(function(s){
+      lastSettings = s;
+      applyPalette(s.palette||'midnight');
+      applyAppearance(s);
+      render(d,s);
+    });
+  });
+}
+window.addEventListener('hashchange', showPage);
+window.addEventListener('resize', resize);
+document.querySelectorAll('.swatch').forEach(function(el){
+  el.onclick=function(){ fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({palette: el.getAttribute('data-palette')})}).then(refresh); };
+});
+document.addEventListener('click', function(e){
+  var row = e.target.closest ? e.target.closest('#catRows tr[data-cat], .cat-leg[data-cat], .cat-seg[data-cat]') : null;
+  if(row) selectCategory(row.getAttribute('data-cat'));
+  var chip = e.target.closest ? e.target.closest('.sound-chip[data-sid]') : null;
+  if(chip){
+    soundPost({action:'select', id: chip.getAttribute('data-sid')});
+  }
+  var petCard = e.target.closest ? e.target.closest('.pet-pack-card[data-pet-pack]') : null;
+  if(petCard){
+    petPackPost({action:'select', id: petCard.getAttribute('data-pet-pack')}).then(function(){notice('已切换桌宠角色');}).catch(function(err){ notice(err.message||'切换失败', true); });
+  }
+});
+if($('showPet')){
+  $('showPet').onchange=function(){
+    var on = $('showPet').checked;
+    fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({show_pet: on})})
+      .then(function(r){ if(!r.ok) throw new Error('settings'); return r.json(); })
+      .catch(function(){ $('showPet').checked = !on; });
+  };
+}
+$('saveRules').onclick=function(){
+  try { var obj=JSON.parse($('rules').value); fetch('/api/rules',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj)}).then(function(r){ if(!r.ok) throw new Error('保存失败'); notice('分类规则已保存'); }).catch(function(e){notice(e.message||'保存失败',true);}); }
+  catch(e){ notice('JSON 无效，请检查逗号和引号', true); }
+};
+$('reclass').onclick=function(){ fetch('/api/reclassify',{method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(refresh); };
+fetch('/api/rules').then(function(r){return r.json();}).then(function(j){ $('rules').value=JSON.stringify(j,null,2); });
+if($('saveGoals')){
+  $('saveGoals').onclick=function(){
+    fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({daily_goals: readGoalForm()})}).then(function(){ refresh(); });
+  };
+}
+if($('savePetSettings')){
+  $('savePetSettings').onclick=function(){
+    var btn = $('savePetSettings');
+    var lines = ($('petLines').value||'').split(/\r?\n/);
+    btn.disabled = true;
+    if($('petSaveStatus')) $('petSaveStatus').textContent = '正在应用…';
+    fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      pet_mode: $('petMode').value,
+      pet_size: $('petSize').value,
+      pet_speech: $('petSpeech').value,
+      pet_lines: lines
+    })}).then(function(r){
+      if(!r.ok) throw new Error('settings');
+      return r.json();
+    }).then(function(j){
+      lastSettings = (j && j.settings) || lastSettings;
+      fillPetSettings(lastSettings);
+      if($('petSaveStatus')) $('petSaveStatus').textContent = '已保存并应用到桌宠';
+    }).catch(function(){
+      if($('petSaveStatus')) $('petSaveStatus').textContent = '保存失败，请确认程序仍在运行';
+    }).then(function(){ btn.disabled = false; });
+  };
+}
+if($('petPackUpload')){
+  $('petPackUpload').onsubmit=function(ev){
+    ev.preventDefault();
+    var form = $('petPackUpload');
+    var btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    fetch('/api/pets',{method:'POST',body:new FormData(form)}).then(function(r){
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'导入失败'); return j; });
+    }).then(function(j){
+      renderPetPacks(j.pets);
+      form.reset();
+      if($('petSaveStatus')) $('petSaveStatus').textContent = '角色已导入并立即应用';
+      refresh();
+    }).then(function(){notice('角色已导入并启用');}).catch(function(err){ notice(err.message||'导入失败', true); }).then(function(){ btn.disabled=false; });
+  };
+}
+if($('deletePetPack')){
+  $('deletePetPack').onclick=function(){
+    var id = (lastPetPacks && lastPetPacks.selected) || 'default';
+    if(id==='default') return;
+    if(!confirm('删除当前自定义角色？原始图片也会从本机角色库移除。')) return;
+    petPackPost({action:'delete',id:id}).then(function(){notice('角色已删除');}).catch(function(err){ notice(err.message||'删除失败', true); });
+  };
+}
+if($('saveIgnore')){
+  $('saveIgnore').onclick=function(){
+    var apps = ($('ignoreApps').value||'').split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean);
+    var minSec = parseFloat($('ignoreMin').value);
+    if(!isFinite(minSec) || minSec<0) minSec = 5;
+    fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ignore_apps: apps, ignore_min_seconds: minSec})}).then(function(){ refresh(); });
+  };
+}
+if($('resetIgnore')){
+  $('resetIgnore').onclick=function(){
+    $('ignoreApps').value = 'ticko.exe\nexplorer.exe\nlockapp.exe';
+    $('ignoreMin').value = 5;
+    fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ignore_apps: ['ticko.exe','explorer.exe','lockapp.exe'], ignore_min_seconds: 5})}).then(function(){ refresh(); });
+  };
+}
+buildGoalForm();
+bindDurSteppers();
+if($('pomoBanner')) $('pomoBanner').onclick=function(){ location.hash='#timer'; };
+if($('pomoStart25')) $('pomoStart25').onclick=function(){ pomoPost({action:'start', focus_min:25, break_min:5}); };
+if($('pomoStart50')) $('pomoStart50').onclick=function(){ pomoPost({action:'start', focus_min:50, break_min:10}); };
+if($('pomoStartSaved')) $('pomoStartSaved').onclick=function(){ pomoPost({action:'start', focus_min: readPomoMin('pomoFocus',25), break_min: readPomoMin('pomoBreak',5)}); };
+if($('pomoPause')) $('pomoPause').onclick=function(){ pomoPost({action:'pause'}); };
+if($('pomoStop')) $('pomoStop').onclick=function(){ pomoPost({action:'stop'}); };
+if($('pomoSaveCfg')) $('pomoSaveCfg').onclick=function(){
+  pomoDurDirty = false;
+  pomoPost({action:'config', focus_min: readPomoMin('pomoFocus',25), break_min: readPomoMin('pomoBreak',5)});
+};
+if($('pomoFocus')) $('pomoFocus').addEventListener('input', function(){ pomoDurDirty = true; });
+if($('pomoBreak')) $('pomoBreak').addEventListener('input', function(){ pomoDurDirty = true; });
+if($('soundPlay')) $('soundPlay').onclick=function(){ soundPost({action:'play'}); };
+if($('pomoSimFocus')) $('pomoSimFocus').onclick=function(){ pomoPost({action:'simulate', kind:'focus_done'}); };
+if($('pomoSimBreak')) $('pomoSimBreak').onclick=function(){ pomoPost({action:'simulate', kind:'break_done'}); };
+if($('pomoTest5')) $('pomoTest5').onclick=function(){ pomoPost({action:'start', focus_sec:5, break_sec:5}); };
+if($('soundUp')){
+  $('soundUp').onsubmit=function(ev){
+    ev.preventDefault();
+    var fd=new FormData($('soundUp'));
+    fetch('/api/sounds',{method:'POST', body: fd}).then(function(r){return r.json();}).then(function(j){
+      if(!j.ok) notice(j.error||'上传失败', true); else notice('铃声已上传并启用');
+      renderSoundList(j.sounds);
+    });
+  };
+}
+if($('soundDelete')){
+  $('soundDelete').onclick=function(){
+    var sid = lastSounds && lastSounds.selected;
+    if(!sid) return;
+    soundPost({action:'delete', id: sid});
+  };
+}
+showPage(); refresh();
+loadSounds();
+loadPetPacks();
+pollPomo();
+setInterval(pollClock, 2000);
+setInterval(refresh, 15000);
+setInterval(painted, 200);
+setInterval(pollPomo, 1000);
+</script>
+</body>
+</html>
