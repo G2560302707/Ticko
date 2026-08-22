@@ -598,6 +598,32 @@ def _pet_runtime_tick():
         _state["work_ts"] = now
         eng.work = logical_work_area(hwnd)
     eng.away = live_away()
+    behavior = meta_get("companion_behavior", "companion")
+    eng.quiet = behavior in ("focus", "quiet")
+    # 数据驱动的反应只在状态切换时发生，并以较低频率读取统计，避免打扰和
+    # 避免在每一帧重复计算完整看板。
+    if now - float(_state.get("companion_poll_ts") or 0) >= 20:
+        _state["companion_poll_ts"] = now
+        try:
+            store = getattr(usage.Handler, "store", None)
+            if store:
+                snap = usage.companion.build_snapshot(
+                    usage.Handler.__new__(usage.Handler).api_dashboard(),
+                    __import__("pomodoro_util").snapshot(),
+                    behavior,
+                )
+                state = snap.get("state")
+                prior = _state.get("companion_state")
+                _state["companion_state"] = state
+                if state != prior and state == "celebrate":
+                    eng.jump_t = 1.0
+                    eng.action, eng.action_t = "sway", 1.0
+                    eng.say("今天的目标完成了，真棒！")
+                elif state != prior and state == "rest" and behavior != "quiet":
+                    eng.action, eng.action_t = "stretch", 1.0
+                    eng.say("回来后我们再继续。")
+        except Exception:
+            pass
     cursor = cursor_logical(hwnd) if eng.mode == "follow" else None
     events = eng.tick(cursor=cursor)
     if events.get("pos"):
@@ -697,6 +723,39 @@ def _hook_apply_pet_settings(settings):
         eng.set_custom_lines(settings.get("pet_lines", eng.custom_lines))
         eng.set_pet_pack(settings.get("pet_pack", eng.pet_pack_id))
     _gui_call(_apply)
+
+
+def _hook_companion_action(action, snapshot):
+    """执行伙伴页的明确指令，并复用当前桌宠引擎与渲染通道。"""
+    def _apply():
+        eng = ensure_engine()
+        if action == "hello":
+            eng.jump_t = 1.0
+            eng.say("我在，继续加油。")
+        elif action == "walk":
+            eng.set_mode("wander")
+            eng.rest_until = 0
+            eng.action, eng.action_t = "sway", 1.0
+            eng.say("出去走走，活动一下。")
+        elif action == "celebrate":
+            eng.jump_t = 1.0
+            eng.action, eng.action_t = "sway", 1.0
+            eng.say("完成得漂亮！")
+        elif action == "rest":
+            eng.set_mode("still")
+            eng.action, eng.action_t = "stretch", 1.0
+            eng.say("休息一下，回来再继续。")
+        elif action == "home":
+            eng.set_mode("still")
+            eng.work = logical_work_area(pet_hwnd())
+            eng.x, eng.y = pet_geom.default_pet_pos_from_work(eng.work, eng.win_w, eng.win_h)
+            move_pet_native(eng.x, eng.y)
+            eng.say("我先回到角落等你。")
+        else:
+            return False
+        push_pet_js_async(pose_payload(eng, {"jump": eng.jump_t, "action": eng.action or "", "say": eng.bubble_text}))
+        return True
+    return bool(_gui_call(_apply))
 
 
 def show_pet_window():
@@ -1037,7 +1096,7 @@ def main():
         alert("服务启动超时。请查看 data\\app.log")
         usage.shutdown_backend()
         return
-    usage.register_pet_hooks(_hook_show_pet, _hook_hide_pet, _hook_apply_pet_settings)
+    usage.register_pet_hooks(_hook_show_pet, _hook_hide_pet, _hook_apply_pet_settings, _hook_companion_action)
     try:
         import webview
     except Exception:

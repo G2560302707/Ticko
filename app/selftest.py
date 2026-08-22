@@ -11,6 +11,7 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app as usage
+import companion
 import pet_packs
 import sound_util
 import window_space
@@ -977,7 +978,7 @@ class DashboardJsTests(unittest.TestCase):
         self.assertIn("dur-stepper", js)
         self.assertIn('id="goalPanel"', html)
         self.assertIn('id="catStrip"', html)
-        self.assertIn('id="showPet"', html)
+        self.assertIn('id="showPetCompanion"', html)
         self.assertIn("function paintPomodoro", js)
         self.assertIn("function pollPomo", js)
         self.assertIn('id="page-timer"', html)
@@ -1018,6 +1019,29 @@ class DashboardJsTests(unittest.TestCase):
         html, _js = _dashboard_inline_js()
         self.assertIn('class="page" id="page-overview"', html)
         self.assertIn("function showPage", _js)
+
+
+class CompanionTests(unittest.TestCase):
+    def test_focus_mode_snapshot_is_quiet_and_explainable(self):
+        snap = companion.build_snapshot(
+            {"today": {"active": 1800, "state": "active"}, "focus_ratio": 76.5, "app_switches": 8, "clock": {}, "goals_progress": []},
+            {"running": False, "mode": "idle", "remaining": 0},
+            "focus",
+            now=1,
+        )
+        self.assertEqual(snap["state"], "focus")
+        self.assertEqual(snap["behavior"], "focus")
+        self.assertEqual(snap["active_seconds"], 1800)
+
+    def test_goal_completion_gets_celebration_state(self):
+        snap = companion.build_snapshot(
+            {"today": {"active": 10, "state": "active"}, "focus_ratio": 0, "app_switches": 0, "clock": {}, "goals_progress": [{"status": "done"}]},
+            {},
+            "companion",
+            now=1,
+        )
+        self.assertEqual(snap["state"], "celebrate")
+        self.assertEqual(snap["recommendation"], "celebrate")
 
 
 class DashboardApiTests(unittest.TestCase):

@@ -25,7 +25,7 @@
   .nav a { color: var(--muted); text-decoration: none; padding: 8px 11px; border-radius: 8px; font-size: 13px; transition: background .16s ease, color .16s ease; }
   .nav a:hover, .nav a:focus-visible { color: var(--text); background: var(--raised); outline: none; }
   .nav a.on { color: var(--text); background: var(--raised); box-shadow: inset 0 -2px 0 var(--green); }
-  .main { overflow: auto; padding: 18px; height: 100%; min-height: 0; }
+  .main { overflow: auto; box-sizing: border-box; padding: 18px 18px 32px; height: 100%; min-height: 0; }
   .page { display: none; height: 100%; min-height: 0; overflow: hidden; }
   .page.on { display: flex; flex-direction: column; gap: 12px; }
   .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; flex-shrink: 0; }
@@ -139,6 +139,27 @@
   .pet-lines-field { grid-column: 1 / -1; }
   textarea.pet-lines { min-height: 96px; resize: vertical; font-family: inherit; font-size: 13px; line-height: 1.6; }
   .pet-save-status { min-height: 1.4em; margin-top: 10px; }
+  #page-companion.page.on { overflow:auto; }
+  .companion-layout { display:grid; grid-template-columns:minmax(330px,.78fr) minmax(460px,1.22fr); gap:12px; flex:0 0 auto; min-height:410px; }
+  .companion-stage { min-height:410px; position:relative; overflow:hidden; background:radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--green) 20%, transparent), transparent 42%), var(--card); }
+  .companion-orbit { position:absolute; width:220px; height:220px; border:1px dashed color-mix(in srgb, var(--green) 38%, transparent); border-radius:50%; left:50%; top:44%; transform:translate(-50%,-50%); }
+  .companion-avatar { position:absolute; width:132px; height:132px; border-radius:34px; left:50%; top:44%; transform:translate(-50%,-50%); display:grid; place-items:center; background:linear-gradient(145deg,color-mix(in srgb,var(--green) 34%,var(--raised)),var(--field)); border:1px solid color-mix(in srgb,var(--green) 52%,var(--line)); box-shadow:0 20px 50px var(--shadow); }
+  .companion-avatar img { width:104px; height:104px; object-fit:contain; animation:companion-breathe 3.2s ease-in-out infinite; }
+  .companion-status { position:absolute; left:20px; right:20px; bottom:18px; padding:14px; border:1px solid var(--line); background:color-mix(in srgb,var(--card) 94%,transparent); border-radius:10px; }
+  .companion-status strong { display:block; font-size:16px; margin-bottom:4px; }
+  .companion-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
+  .companion-metrics .card { padding:10px; box-shadow:none; }
+  .companion-metrics .value { font-size:18px; }
+  .companion-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
+  .companion-actions button:first-child { background:var(--green); color:var(--on-accent); border-color:var(--green); }
+  .companion-control { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:end; margin-top:14px; }
+  #companionSettingsMount { width:100%; flex:0 0 auto; min-height:0; }
+  #companionSettingsMount .pet-settings { margin:0; padding:20px; overflow:visible !important; }
+  #companionSettingsMount .pet-settings-head { padding-bottom:12px; border-bottom:1px solid var(--line); }
+  #companionSettingsMount .pet-pack-section { margin-top:12px; padding-top:0; border-top:0; }
+  #companionSettingsMount .pet-settings-grid { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  #companionSettingsMount .pet-lines-field { grid-column:1 / -1; }
+  @keyframes companion-breathe { 50% { transform:translateY(-5px) scale(1.035); } }
   #page-settings #rules { flex: 1 1 auto; min-height: 180px; }
   #catRows tr, #breakApps tr { cursor: pointer; }
   #catRows tr.on, #breakApps tr.on { background: var(--raised); }
@@ -213,6 +234,8 @@
   .settings-section[open] > summary::after { content: '收起'; }
   .toast { position: fixed; z-index: 20; right: 20px; bottom: 20px; max-width: 360px; padding: 11px 14px; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 8px; box-shadow: 0 12px 32px var(--shadow); transform: translateY(16px); opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
   .apps-shell { width: min(1180px, 100%); margin: 0 auto; display: grid; gap: 12px; padding-bottom: 16px; }
+  #page-apps.page.on { overflow: hidden; }
+  #page-apps .apps-shell { height: 100%; min-height: 0; grid-template-rows: auto auto minmax(0, 1fr); padding-bottom: 0; }
   .apps-summary { display: grid; grid-template-columns: minmax(0,1.4fr) repeat(2, minmax(120px,.55fr)); gap: 18px; align-items: center; padding: 18px 20px; }
   .apps-summary h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
   .apps-summary p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
@@ -226,11 +249,17 @@
   .spot-rank { color: var(--muted); font-size: 12px; }
   .spot-name { min-width: 0; font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spot-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .app-list { display: grid; gap: 2px; padding: 6px; }
+  .app-list { display: flex; flex-direction: column; gap: 2px; min-height: 0; padding: 6px; }
   .app-list-head { display: grid; grid-template-columns: 42px minmax(180px,1fr) minmax(120px,2.2fr) 84px 56px; gap: 14px; padding: 5px 12px 8px; color: var(--muted); font-size: 11px; }
   .app-list-head span:nth-last-child(-n+2) { text-align: right; }
   .app-row { display: grid; grid-template-columns: 42px minmax(180px,1fr) minmax(120px,2.2fr) 84px 56px; align-items: center; gap: 14px; min-height: 54px; padding: 0 12px; border-radius: 8px; cursor: default; }
   .app-row:hover { background: var(--raised); }
+  .app-list-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 1px 2px 8px 0; scrollbar-gutter: stable; }
+  .app-list-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent; }
+  .app-list-scroll::-webkit-scrollbar { width: 7px; }
+  .app-list-scroll::-webkit-scrollbar-track { background: transparent; }
+  .app-list-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 99px; }
+  .app-list-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--green) 70%, var(--muted)); }
   .app-rank { color: var(--muted); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
   .app-ident { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 600; }
   .app-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -273,7 +302,8 @@
     .timer-duration { grid-template-columns: 1fr 1fr; }
     .timer-duration > .label { grid-column: 1 / -1; }
     .pet-settings-head { align-items: flex-start; flex-direction: column; }
-    .pet-settings-grid { grid-template-columns: 1fr; }
+    .pet-settings-grid, .companion-layout { grid-template-columns: 1fr; }
+    .companion-stage { min-height:360px; }
     .pet-lines-field { grid-column: auto; }
     .pet-pack-form { grid-template-columns: 1fr; }
     .live { display: none; }
@@ -294,6 +324,7 @@
     <a href="#timeline" data-page="timeline">记录</a>
     <a href="#apps" data-page="apps">应用</a>
     <a href="#timer" data-page="timer">专注</a>
+    <a href="#companion" data-page="companion">伙伴</a>
     <a href="#settings" data-page="settings">设置</a>
   </div>
   <div class="main">
@@ -409,7 +440,7 @@
         <div class="app-spotlight" id="appSpotlight"></div>
         <div class="panel app-list">
           <div class="app-list-head"><span>排名</span><span>应用</span><span></span><span>时长</span><span>占比</span></div>
-          <div id="appList"></div>
+          <div id="appList" class="app-list-scroll"></div>
         </div>
       </div>
     </div>
@@ -491,12 +522,29 @@
         </div>
       </div>
     </div>
+    <div class="page" id="page-companion">
+      <div class="companion-layout">
+        <section class="panel companion-stage" aria-label="伙伴实时状态">
+          <div class="companion-orbit"></div>
+          <div class="companion-avatar"><img id="companionAvatar" src="/app/icon.png" alt="Ticko 伙伴"></div>
+          <div class="companion-status"><strong id="companionLabel">连接中</strong><span class="tip" id="companionMessage">正在读取今天的节奏。</span></div>
+        </section>
+        <section class="panel">
+          <h2>伙伴控制台</h2>
+          <div class="companion-metrics"><div class="card"><span class="label">有效使用</span><div class="value" id="companionActive">—</div></div><div class="card"><span class="label">专注占比</span><div class="value" id="companionFocus">—</div></div><div class="card"><span class="label">应用切换</span><div class="value" id="companionSwitches">—</div></div></div>
+          <div class="companion-actions"><button type="button" data-companion-action="hello">打招呼</button><button type="button" data-companion-action="walk">去散步</button><button type="button" data-companion-action="celebrate">庆祝</button><button type="button" data-companion-action="rest">休息</button><button type="button" data-companion-action="home">回到角落</button></div>
+          <div class="companion-control"><label class="setting-field"><span class="label">陪伴模式</span><select id="companionBehavior"><option value="companion">陪伴</option><option value="focus">专注</option><option value="quiet">安静</option></select></label><label class="label" style="display:flex;align-items:center;gap:8px;padding-bottom:9px;"><input type="checkbox" id="showPetCompanion" checked style="width:auto"> 显示桌宠</label></div>
+          <p class="tip">伙伴会根据专注、离开、目标与番茄钟状态调整行为；所有反应都在本机完成。</p>
+        </section>
+      </div>
+      <div id="companionSettingsMount"></div>
+    </div>
     <div class="page" id="page-settings">
-      <div class="panel pet-settings">
+      <div class="panel pet-settings" id="companionSettings">
         <div class="pet-settings-head">
           <div>
-            <h2>桌宠个性</h2>
-            <p class="tip">保存后立即生效</p>
+            <h2>角色与台词</h2>
+            <p class="tip">动作与桌宠显示在伙伴页控制。</p>
           </div>
           <button type="button" id="savePetSettings" class="primary">应用并保存</button>
         </div>
@@ -560,10 +608,6 @@
             <div class="swatch p-contrast" data-palette="contrast">高对比</div>
           </div>
           <p class="tip">纯色界面，更清晰</p>
-          <label class="label" style="display:flex;align-items:center;gap:8px;margin:12px 0 10px;flex-shrink:0;">
-            <input type="checkbox" id="showPet" checked style="width:auto"> 显示桌宠（软件化身，关面板后仍在桌面）
-          </label>
-          <p class="tip">桌宠设置在本页顶部</p>
         </div>
         <div class="panel">
           <h2>统计规则 <span class="chart-note">高级</span></h2>
@@ -627,6 +671,9 @@ var pomoDurDirty = false;
 var lastSounds = null;
 var lastPetPacks = null;
 function $(id){ return document.getElementById(id); }
+var companionSettingsPanel = $('companionSettings');
+var companionSettingsMount = $('companionSettingsMount');
+if(companionSettingsPanel && companionSettingsMount) companionSettingsMount.appendChild(companionSettingsPanel);
 function tone(name){ return getComputedStyle(document.documentElement).getPropertyValue('--'+name).trim(); }
 var toastTimer = 0;
 function notice(message, error){ var el=$('toast'); if(!el) return; el.textContent=message; el.className='toast on'+(error?' error':''); clearTimeout(toastTimer); toastTimer=setTimeout(function(){el.className='toast';},3200); }
@@ -992,6 +1039,9 @@ function renderPetPacks(data){
   var box = $('petPackList');
   if(!box) return;
   var selected = lastPetPacks.selected || 'default';
+  var active = (lastPetPacks.items||[]).filter(function(p){ return p.id===selected; })[0];
+  var avatar = $('companionAvatar');
+  if(avatar && active && active.preview) avatar.src = active.preview;
   box.innerHTML = (lastPetPacks.items||[]).map(function(p){
     return '<button type="button" class="pet-pack-card'+(p.id===selected?' on':'')+'" data-pet-pack="'+esc(p.id)+'" title="切换到 '+esc(p.name)+'"><img src="'+esc(p.preview)+'" alt=""><span>'+esc(p.name)+'</span></button>';
   }).join('');
@@ -1021,6 +1071,9 @@ function fillPetSettings(settings){
   if(lines && document.activeElement !== lines){
     lines.value = (settings.pet_lines || []).join('\n');
   }
+  var behavior = $('companionBehavior');
+  if(behavior && document.activeElement !== behavior) behavior.value = settings.companion_behavior || 'companion';
+  ['showPet','showPetCompanion'].forEach(function(id){ var el=$(id); if(el) el.checked = settings.show_pet !== false; });
 }
 function dayBarTip(seg){
   return (seg.category||'')+' · '+appLabel(seg.app||'无焦点')+' · '+clockTime(seg.start)+' - '+clockTime(seg.end)+' · '+fmt(seg.end-seg.start)+(seg.title?' · '+displayTitle(seg.title):'');
@@ -1263,6 +1316,22 @@ function jsonGet(url, fallback){
     return r.json();
   }).catch(function(){ return fallback; });
 }
+function renderCompanion(data){
+  if(!data) return;
+  if($('companionLabel')) $('companionLabel').textContent = data.label || '陪伴中';
+  if($('companionMessage')) $('companionMessage').textContent = data.message || '';
+  if($('companionActive')) $('companionActive').textContent = fmt(data.active_seconds || 0);
+  if($('companionFocus')) $('companionFocus').textContent = Math.round(data.focus_ratio || 0) + '%';
+  if($('companionSwitches')) $('companionSwitches').textContent = data.switches || 0;
+  if($('companionBehavior') && document.activeElement !== $('companionBehavior')) $('companionBehavior').value = data.behavior || 'companion';
+}
+function refreshCompanion(){ jsonGet('/api/companion', null).then(renderCompanion); }
+function companionAction(action){
+  fetch('/api/companion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})})
+    .then(function(r){ return r.json().then(function(j){ if(!r.ok || !j.ok) throw new Error(j.error||'动作没有执行'); return j; }); })
+    .then(function(j){ renderCompanion(j.companion); notice('伙伴已响应'); })
+    .catch(function(e){ notice(e.message||'伙伴暂时无法响应',true); });
+}
 function pollClock(){
   jsonGet('/api/clock', null).then(function(c){
     if(c && c.server_ts) applyClockSnap(c);
@@ -1279,6 +1348,7 @@ function refresh(){
       applyPalette(s.palette||'midnight');
       applyAppearance(s);
       render(d,s);
+      refreshCompanion();
     });
   });
 }
@@ -1288,6 +1358,8 @@ document.querySelectorAll('.swatch').forEach(function(el){
   el.onclick=function(){ fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({palette: el.getAttribute('data-palette')})}).then(refresh); };
 });
 document.addEventListener('click', function(e){
+  var companionButton = e.target.closest ? e.target.closest('[data-companion-action]') : null;
+  if(companionButton){ companionAction(companionButton.getAttribute('data-companion-action')); return; }
   var row = e.target.closest ? e.target.closest('#catRows tr[data-cat], .cat-leg[data-cat], .cat-seg[data-cat]') : null;
   if(row) selectCategory(row.getAttribute('data-cat'));
   var chip = e.target.closest ? e.target.closest('.sound-chip[data-sid]') : null;
@@ -1299,14 +1371,22 @@ document.addEventListener('click', function(e){
     petPackPost({action:'select', id: petCard.getAttribute('data-pet-pack')}).then(function(){notice('已切换桌宠角色');}).catch(function(err){ notice(err.message||'切换失败', true); });
   }
 });
-if($('showPet')){
-  $('showPet').onchange=function(){
-    var on = $('showPet').checked;
+['showPet','showPetCompanion'].forEach(function(id){
+  var toggle=$(id); if(!toggle) return;
+  toggle.onchange=function(){
+    var on = toggle.checked;
     fetch('/api/settings',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({show_pet: on})})
       .then(function(r){ if(!r.ok) throw new Error('settings'); return r.json(); })
-      .catch(function(){ $('showPet').checked = !on; });
+      .then(function(j){ fillPetSettings((j&&j.settings)||lastSettings); })
+      .catch(function(){ toggle.checked = !on; });
   };
-}
+});
+if($('companionBehavior')) $('companionBehavior').onchange=function(){
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companion_behavior:$('companionBehavior').value})})
+    .then(function(r){ if(!r.ok) throw new Error('settings'); return r.json(); })
+    .then(function(j){ lastSettings=(j&&j.settings)||lastSettings; refreshCompanion(); })
+    .catch(function(){ notice('陪伴模式保存失败',true); });
+};
 $('saveRules').onclick=function(){
   try { var obj=JSON.parse($('rules').value); fetch('/api/rules',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj)}).then(function(r){ if(!r.ok) throw new Error('保存失败'); notice('分类规则已保存'); }).catch(function(e){notice(e.message||'保存失败',true);}); }
   catch(e){ notice('JSON 无效，请检查逗号和引号', true); }

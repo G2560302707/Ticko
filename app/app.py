@@ -56,6 +56,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import classify as classify_mod
+import companion
 import goals_util
 import pet_engine
 import pet_packs
@@ -90,7 +91,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("usage")
 
-_pet_hooks = {"show": None, "hide": None, "settings": None}
+_pet_hooks = {"show": None, "hide": None, "settings": None, "action": None}
 _app_icon_lock = threading.Lock()
 
 
@@ -177,11 +178,12 @@ def _app_icon_file(exe_name):
 _pet_hook_lock = threading.Lock()
 
 
-def register_pet_hooks(show_fn=None, hide_fn=None, settings_fn=None):
+def register_pet_hooks(show_fn=None, hide_fn=None, settings_fn=None, action_fn=None):
     with _pet_hook_lock:
         _pet_hooks["show"] = show_fn
         _pet_hooks["hide"] = hide_fn
         _pet_hooks["settings"] = settings_fn
+        _pet_hooks["action"] = action_fn
 
 
 def apply_pet_visibility(show):
@@ -207,6 +209,18 @@ def apply_pet_settings(settings):
         return True
     except Exception:
         log.warning("桌宠设置回调失败", exc_info=True)
+        return False
+
+
+def apply_companion_action(action, snapshot=None):
+    with _pet_hook_lock:
+        fn = _pet_hooks["action"]
+    if not fn:
+        return False
+    try:
+        return bool(fn(str(action or ""), dict(snapshot or {})))
+    except Exception:
+        log.warning("伙伴动作回调失败", exc_info=True)
         return False
 
 
@@ -1083,6 +1097,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 show = bool(data.get("show_pet"))
                 self.store.set_meta("show_pet", "1" if show else "0")
                 apply_pet_visibility(show)
+            if "companion_behavior" in data:
+                self.store.set_meta(
+                    "companion_behavior",
+                    companion.normalize_behavior(data.get("companion_behavior")),
+                )
             pet_keys = ("pet_mode", "pet_size", "pet_speech", "pet_lines", "pet_pack")
             pet_changed = any(k in data for k in pet_keys)
             if pet_changed:
@@ -1149,6 +1168,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_themes_post(raw)
         elif path == "/api/pets":
             self._handle_pet_packs_post(raw)
+        elif path == "/api/companion":
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                data = {}
+            action = str(data.get("action") or "")
+            if action not in companion.ACTION_NAMES:
+                self._send(400, json.dumps({"ok": False, "error": "未知伙伴动作"}, ensure_ascii=False))
+                return
+            snap = self.api_companion()
+            self._send(200, json.dumps({"ok": apply_companion_action(action, snap), "companion": snap}, ensure_ascii=False))
         elif path == "/api/shutdown":
             self._send(200, json.dumps({"ok": True}))
             request_shutdown()
@@ -1406,6 +1436,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps(self.api_themes(), ensure_ascii=False))
         elif path == "/api/pets":
             self._send(200, json.dumps(self.api_pet_packs(), ensure_ascii=False))
+        elif path == "/api/companion":
+            self._send(200, json.dumps(self.api_companion(), ensure_ascii=False))
         elif path == "/api/settings":
             self._send(200, json.dumps(self.api_settings(), ensure_ascii=False))
         elif path == "/api/ping":
@@ -1743,7 +1775,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "daily_goals": self.store.daily_goals(),
         }
         result.update(pet_settings_from_store(self.store))
+        result["companion_behavior"] = companion.normalize_behavior(
+            self.store.get_meta("companion_behavior") or "companion"
+        )
         return result
+
+    def api_companion(self):
+        behavior = companion.normalize_behavior(self.store.get_meta("companion_behavior") or "companion")
+        return companion.build_snapshot(self.api_dashboard(), pomodoro_util.snapshot(), behavior)
 
     def api_week(self):
         today = datetime.date.today()
