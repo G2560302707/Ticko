@@ -1,0 +1,6 @@
+# 运行时生成的文件（不入库，避免反复冲突）
+data/usage.db
+data/usage.db-shm
+data/usage.db-wal
+data/app.log
+data/app.pid
