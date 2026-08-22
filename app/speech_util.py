@@ -19,8 +19,6 @@ import winsound
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(SCRIPT_DIR, "models", "vosk-model-small-cn-0.22")
-PIPER_DIR = os.path.join(SCRIPT_DIR, "models", "piper")
-PIPER_MODEL = os.path.join(PIPER_DIR, "zh_CN-huayan-medium.onnx")
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
 MAX_SECONDS = 22
 _model = None
@@ -31,8 +29,6 @@ _listen_cancel = threading.Event()
 _listen_generation = 0
 _speech_lock = threading.Lock()
 _speech_jobs = 0
-_piper_voice = None
-_piper_lock = threading.Lock()
 
 # 在线音色作为主声音；网络不可用时自动回退 Ticko 内置离线声音。
 VOICE_PRESETS = {
@@ -56,7 +52,7 @@ def status():
         "available": available(),
         "mode": "本地识别" if available() else "语音模型未就绪",
         "voices": [{"id": key, "label": item["label"]} for key, item in VOICE_PRESETS.items()],
-        "offline_voice": os.path.isfile(PIPER_MODEL),
+        "offline_voice": True,  # 离线兜底：断网时回退 Windows 系统语音(SAPI)
     }
 
 
@@ -65,18 +61,6 @@ def is_speaking():
         return _speech_jobs > 0
 
 
-def warmup_offline_voice():
-    """后台预热离线模型，避免第一次开口才产生加载延迟。"""
-    if not os.path.isfile(PIPER_MODEL):
-        return False
-    def work():
-        try:
-            _load_piper_voice()
-        except Exception:
-            pass
-    threading.Thread(target=work, name="TickoVoiceWarmup", daemon=True).start()
-    return True
-
 
 def _set_speaking(change):
     global _speech_jobs
@@ -84,56 +68,6 @@ def _set_speaking(change):
         _speech_jobs = max(0, _speech_jobs + change)
 
 
-def _load_piper_voice():
-    """加载一次本地中文语音；通过 ASCII 目录兼容 Windows ONNX 运行库。"""
-    global _piper_voice
-    if not os.path.isfile(PIPER_MODEL):
-        return None
-    with _piper_lock:
-        if _piper_voice is None:
-            from piper import PiperVoice
-            model_path = PIPER_MODEL
-            drive = os.path.splitdrive(model_path)[0] or "C:"
-            if any(ord(char) > 127 for char in model_path):
-                alias = drive + os.sep + "TickoTtsModel"
-                if not os.path.exists(alias):
-                    subprocess.run(["cmd.exe", "/c", "mklink", "/J", alias, os.path.dirname(model_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-                candidate = os.path.join(alias, os.path.basename(model_path))
-                if os.path.isfile(candidate):
-                    model_path = candidate
-            # Piper 的语音数据随包安装；ONNX/phonemizer 在 Windows 下需要 ASCII 路径。
-            package_data = os.path.join(os.path.dirname(__import__("piper").__file__), "espeak-ng-data")
-            espeak_alias = drive + os.sep + "TickoEspeakData"
-            if not os.path.exists(espeak_alias):
-                subprocess.run(["cmd.exe", "/c", "mklink", "/J", espeak_alias, package_data], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            _piper_voice = PiperVoice.load(model_path, espeak_data_dir=espeak_alias if os.path.isdir(espeak_alias) else package_data)
-    return _piper_voice
-
-
-def _speak_piper(text, rate=0):
-    """离线合成并播放一小段语句，文件在播放后立即删除。"""
-    voice = _load_piper_voice()
-    if voice is None:
-        raise RuntimeError("offline voice unavailable")
-    temp_path = ""
-    try:
-        handle = tempfile.NamedTemporaryFile(prefix="ticko_local_voice_", suffix=".wav", delete=False)
-        temp_path = handle.name
-        from piper.config import SynthesisConfig
-        # 语速仍沿用 Ticko 的 -4 ~ +4 设置，完全在本地推理时生效。
-        length_scale = max(0.82, min(1.18, 1.0 - (float(rate) * 0.045)))
-        with wave.open(handle, "wb") as wav_file:
-            voice.synthesize_wav(text, wav_file, syn_config=SynthesisConfig(length_scale=length_scale))
-        winsound.PlaySound(temp_path, winsound.SND_FILENAME)
-        return True
-    finally:
-        if temp_path:
-            for _ in range(3):
-                try:
-                    os.remove(temp_path)
-                    break
-                except OSError:
-                    time.sleep(0.12)
 
 
 def _load_model():
@@ -312,12 +246,9 @@ def speak_stream_async(text, enabled=False, rate=0, preset="cute"):
                         _speak_online(piece, preset)
                     except Exception:
                         try:
-                            _speak_piper(piece, rate)
+                            _speak_local(piece, rate)
                         except Exception:
-                            try:
-                                _speak_local(piece, rate)
-                            except Exception:
-                                pass
+                            pass
             finally:
                 _set_speaking(-1)
         threading.Thread(target=work, name="TickoSpeechStream", daemon=True).start()
@@ -410,12 +341,9 @@ def speak_async(text, enabled=False, rate=0, preset="cute"):
                 _speak_online(text, preset)
             except Exception:
                 try:
-                    _speak_piper(text, rate)
+                    _speak_local(text, rate)
                 except Exception:
-                    try:
-                        _speak_local(text, rate)
-                    except Exception:
-                        pass
+                    pass
             finally:
                 _set_speaking(-1)
         threading.Thread(target=work, name="TickoSpeech", daemon=True).start()

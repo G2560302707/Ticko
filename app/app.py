@@ -252,7 +252,7 @@ def pet_settings_from_store(store):
 def companion_ai_settings_from_store(store, include_secret=False):
     settings = companion_ai.public_settings(store.get_meta)
     settings["proactive_enabled"] = (store.get_meta("ai_proactive_enabled") or "1") == "1"
-    settings["voice_enabled"] = (store.get_meta("ai_voice_enabled") or "0") == "1"
+    settings["voice_enabled"] = (store.get_meta("ai_voice_enabled") or "1") == "1"
     settings["voice_input_enabled"] = (store.get_meta("ai_voice_input_enabled") or "1") == "1"
     try:
         settings["voice_rate"] = max(-4, min(4, int(store.get_meta("ai_voice_rate") or 0)))
@@ -2188,7 +2188,6 @@ def start_backend(serve_in_thread=True):
         sound_util.ensure_defaults()
     except Exception:
         log.warning("生成默认提醒音失败", exc_info=True)
-    speech_util.warmup_offline_voice()
     stop = threading.Event()
     threading.Thread(target=collector_loop, args=(tracker, stop), daemon=True).start()
     Handler.tracker = tracker
