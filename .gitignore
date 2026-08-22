@@ -14,7 +14,8 @@ data/shortcut_done
 # user runtime data (custom themes / pets / sounds / previews)
 data/pets/
 data/themes/
-data/sounds/
+data/sounds/*
+!data/sounds/builtin/
 data/voice_samples/
 
 # python bytecode cache
