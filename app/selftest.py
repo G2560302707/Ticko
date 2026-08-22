@@ -12,8 +12,10 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app as usage
 import companion
+import companion_ai
 import pet_packs
 import sound_util
+import speech_util
 import window_space
 sound_util.SILENT = True
 
@@ -243,6 +245,16 @@ class PomodoroTests(unittest.TestCase):
 
 
 class SoundUtilTests(unittest.TestCase):
+    def test_voice_input_rejects_invalid_audio_without_persisting_it(self):
+        text, error = speech_util.transcribe_wav(b"not a wav")
+        self.assertEqual(text, "")
+        self.assertTrue(error)
+
+    def test_cute_voice_presets_are_available(self):
+        presets = speech_util.status()["voices"]
+        self.assertGreaterEqual(len(presets), 4)
+        self.assertEqual(presets[0]["id"], "cute")
+
     # 隔离：测试期间所有音效读写都指向系统临时目录，绝不触碰真实 data/。
     def setUp(self):
         import tempfile
@@ -572,6 +584,16 @@ class PetEngineTests(unittest.TestCase):
                 said += 1
         self.assertGreaterEqual(said, 2)
 
+    def test_interaction_level_controls_animation_intensity(self):
+        import pet_engine
+        eng = pet_engine.PetEngine(80, 80, 218, 312, (0, 0, 1707, 1019))
+        self.assertTrue(eng.set_interaction_level("light"))
+        self.assertEqual(eng.interaction_level, "light")
+        self.assertLess(pet_engine.ACTIVITY_SCALE["light"], pet_engine.ACTIVITY_SCALE["medium"])
+        self.assertTrue(eng.set_interaction_level("heavy"))
+        self.assertGreater(pet_engine.ACTIVITY_SCALE["heavy"], pet_engine.ACTIVITY_SCALE["medium"])
+        self.assertFalse(eng.set_interaction_level("unknown"))
+
     def test_custom_lines_are_sanitized_and_used(self):
         import pet_engine
         class R:
@@ -615,6 +637,16 @@ class PetEngineTests(unittest.TestCase):
         events = {}
         chatty._maybe_speak(events, 0.01)
         self.assertEqual(events.get("say"), "在这里")
+
+    def test_companion_reply_can_stream_into_pet_bubble(self):
+        import pet_engine
+        eng = pet_engine.PetEngine(0, 0, 174, 247, (0, 0, 800, 600))
+        self.assertTrue(eng.say("逐字出现", stream=True))
+        self.assertEqual(eng.bubble_text, "")
+        for _ in range(20):
+            eng.tick()
+        self.assertEqual(eng.bubble_text, "逐字出现")
+        self.assertFalse(eng.bubble_streaming)
 
     def test_custom_lines_have_hard_limits(self):
         import pet_engine
@@ -1044,6 +1076,79 @@ class CompanionTests(unittest.TestCase):
         self.assertEqual(snap["recommendation"], "celebrate")
 
 
+class CompanionAiTests(unittest.TestCase):
+    def test_config_is_local_and_key_is_never_public(self):
+        meta = {"ai_enabled": "1", "ai_provider": "ollama", "ai_api_key": "secret", "ai_name": "小搭子"}
+        settings = companion_ai.public_settings(lambda key: meta.get(key))
+        self.assertTrue(settings["enabled"])
+        self.assertTrue(settings["api_key_configured"])
+        self.assertNotIn("api_key", settings)
+        self.assertEqual(settings["name"], "小搭子")
+
+    def test_disabled_model_uses_data_aware_fallback(self):
+        settings = {"enabled": False, "provider": "off", "persona": "coach"}
+        reply = companion_ai.generate(settings, {"state": "focus", "active_seconds": 1200, "focus_ratio": 80, "switches": 2}, "总结今天", [], "hello")
+        self.assertEqual(reply["source"], "local")
+        self.assertIn("有效投入", reply["reply"])
+        self.assertIn(reply["action"], companion_ai.ACTIONS)
+
+    def test_action_is_extracted_and_not_arbitrary(self):
+        text, action = companion_ai._extract_reply("做得很好。 [action:celebrate]", "hello")
+        self.assertEqual(text, "做得很好。")
+        self.assertEqual(action, "celebrate")
+
+    def test_model_error_never_leaves_companion_silent(self):
+        old = companion_ai._request_json
+        companion_ai._request_json = lambda *_a, **_k: (None, "无法连接模型服务")
+        try:
+            settings = {"enabled": True, "provider": "ollama", "persona": "gentle", "name": "Ticko", "base_url": "http://127.0.0.1:11434", "model": "missing", "share_app": False, "custom_prompt": "", "api_key": ""}
+            reply = companion_ai.generate(settings, {"state": "companion", "active_seconds": 0, "focus_ratio": 0, "switches": 0, "pomodoro": {}}, "你好", [], "hello")
+        finally:
+            companion_ai._request_json = old
+        self.assertEqual(reply["source"], "local")
+        self.assertEqual(reply["error"], "无法连接模型服务")
+
+    def test_interaction_levels_have_ordered_budgets(self):
+        light = companion_ai.level_policy("light")
+        medium = companion_ai.level_policy("medium")
+        heavy = companion_ai.level_policy("heavy")
+        self.assertLess(light["daily_requests"], medium["daily_requests"])
+        self.assertLess(medium["daily_requests"], heavy["daily_requests"])
+        self.assertLess(light["max_tokens"], medium["max_tokens"])
+        self.assertLess(medium["max_tokens"], heavy["max_tokens"])
+
+    def test_level_limits_openai_output(self):
+        captured = []
+        old = companion_ai._request_json
+        companion_ai._request_json = lambda url, body, _headers, **_k: (captured.append(body) or {"choices": [{"message": {"content": "好的"}}]}, None)
+        try:
+            settings = {"enabled": True, "provider": "openai", "persona": "gentle", "name": "Ticko", "base_url": "https://example.test/v1", "model": "demo", "share_app": False, "custom_prompt": "", "api_key": "x", "interaction_level": "light"}
+            companion_ai.generate(settings, {}, "你好", [{"role": "user", "content": "a"}] * 6)
+        finally:
+            companion_ai._request_json = old
+        self.assertEqual(captured[0]["max_tokens"], companion_ai.level_policy("light")["max_tokens"])
+        self.assertLessEqual(len(captured[0]["messages"]), 1 + companion_ai.level_policy("light")["history"] + 1)
+
+    def test_deepseek_short_companion_reply_disables_thinking(self):
+        captured = []
+        old = companion_ai._request_json
+        companion_ai._request_json = lambda url, body, _headers, **_k: (captured.append(body) or {"choices": [{"message": {"content": "好的"}}]}, None)
+        try:
+            settings = {"enabled": True, "provider": "openai", "persona": "gentle", "name": "Ticko", "base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash", "share_app": False, "custom_prompt": "", "api_key": "x", "interaction_level": "medium"}
+            companion_ai.generate(settings, {}, "你好", [])
+        finally:
+            companion_ai._request_json = old
+        self.assertEqual(captured[0]["thinking"], {"type": "disabled"})
+
+    def test_light_mode_never_auto_calls_model(self):
+        class Store:
+            def __init__(self): self.data = {"ai_interaction_level": "light", "ai_enabled": "1", "ai_provider": "openai"}
+            def get_meta(self, key): return self.data.get(key)
+            def set_meta(self, key, value): self.data[key] = value
+        result = usage.maybe_companion_auto_reply(Store(), {"today": {}, "clock": {}, "goals_progress": [], "status": {}}, {}, "companion", "steady")
+        self.assertIsNone(result)
+
+
 class DashboardApiTests(unittest.TestCase):
     def setUp(self):
         fd, self.path = tempfile.mkstemp(suffix=".db")
@@ -1130,8 +1235,14 @@ class PetOpenDashboardTests(unittest.TestCase):
         import pet_view
         goals = inspect.getsource(pet_view.PetView._on_goals)
         timer = inspect.getsource(pet_view.PetView._on_pomo_settings)
+        chat = inspect.getsource(pet_view.PetView._on_companion_chat)
         self.assertIn('open_dashboard_page("#settings")', goals)
         self.assertIn('open_dashboard_page("#timer")', timer)
+        self.assertIn("open_companion_chat_window()", chat)
+        with open(os.path.join(os.path.dirname(__file__), "companion_chat.html"), "r", encoding="utf-8") as f:
+            companion_chat = f.read()
+        self.assertIn("/api/companion/listen", companion_chat)
+        self.assertIn("pollListening", companion_chat)
         pause = inspect.getsource(pet_view.PetView._on_pomo_pause)
         stop = inspect.getsource(pet_view.PetView._on_pomo_stop)
         self.assertNotIn("evaluate_js", pause)

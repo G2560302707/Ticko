@@ -241,30 +241,40 @@ def _wrap_text(draw, text, font, max_w):
 def _draw_timer_chip(canvas, text, sprite_h):
     metrics = pet_geom.bubble_metrics(sprite_h)
     draw = ImageDraw.Draw(canvas)
-    font = _font(max(13, metrics["font"]))
+    font = _font(max(12, metrics["font"] - 1))
     tw, th = _text_wh(draw, text, font)
-    pad_x, pad_y = max(10, metrics["pad_x"] - 2), max(5, metrics["pad_y"] - 2)
-    bw = tw + pad_x * 2
-    bh = th + pad_y * 2
+    pad_x, pad_y = max(9, metrics["pad_x"] - 3), max(4, metrics["pad_y"] - 3)
+    dot = max(5, th // 3)
+    gap = 6
+    bw = tw + pad_x * 2 + dot + gap
+    bh = max(th + pad_y * 2, dot + pad_y * 2)
     x = max(4, (canvas.width - bw) // 2)
-    y = 4
-    bg = (18, 24, 42, 220)
-    fg = (62, 224, 143, 255)
+    y = 6
+    bg = (25, 34, 57, 204)
+    shadow = (11, 16, 31, 64)
+    fg = (139, 239, 190, 255)
+    accent = (83, 220, 165, 255)
     if str(text).startswith("休息"):
-        fg = (90, 168, 255, 255)
+        fg, accent = (164, 205, 255, 255), (99, 164, 255, 255)
     elif str(text).startswith("暂停"):
-        fg = (245, 193, 93, 255)
-    radius = max(10, metrics["font"] // 2)
+        fg, accent = (255, 215, 141, 255), (246, 185, 81, 255)
+    radius = max(11, bh // 2)
     try:
+        draw.rounded_rectangle((x, y + 2, x + bw, y + bh + 2), radius=radius, fill=shadow)
         draw.rounded_rectangle((x, y, x + bw, y + bh), radius=radius, fill=bg)
     except Exception:
         draw.rectangle((x, y, x + bw, y + bh), fill=bg)
     try:
-        draw.rounded_rectangle((x, y, x + bw, y + bh), radius=radius, outline=(255, 255, 255, 40))
+        draw.rounded_rectangle((x, y, x + bw, y + bh), radius=radius, outline=(180, 205, 255, 52))
     except Exception:
         pass
-    draw.text((x + pad_x, y + pad_y - 1), text, font=font, fill=fg)
-    return y + bh + 4
+    cy = y + bh // 2
+    try:
+        draw.ellipse((x + pad_x, cy - dot // 2, x + pad_x + dot, cy - dot // 2 + dot), fill=accent)
+    except Exception:
+        pass
+    draw.text((x + pad_x + dot + gap, y + pad_y - 1), text, font=font, fill=fg)
+    return y + bh + 6
 
 
 def _draw_bubble(canvas, text, inner, sprite_h, top=4):
@@ -580,6 +590,8 @@ class PetView:
         _add_menu_item(pomo.DropDownItems, "结束", self._on_pomo_stop, fg, bg)
         _add_menu_item(pomo.DropDownItems, "设置时间…", self._on_pomo_settings, fg, bg)
         menu.Items.Add(ToolStripSeparator())
+        _add_menu_item(menu.Items, "打开对话", self._on_companion_chat, fg, bg)
+        _add_menu_item(menu.Items, "结束对话并隐藏窗口", self._on_close_companion_chat, fg, bg)
         _add_menu_item(menu.Items, "打开面板", lambda s, e: m.bring_to_front(), fg, bg)
         _add_menu_item(menu.Items, "回到屏幕内", lambda s, e: self._snap(), fg, bg)
         _add_menu_item(menu.Items, "隐藏桌宠", lambda s, e: m.hide_pet_window(), fg, bg)
@@ -642,6 +654,14 @@ class PetView:
     def _on_goals(self, sender, args):
         self.m.open_dashboard_page("#settings")
         self.m.ensure_engine().say("去面板改今日目标")
+
+    def _on_companion_chat(self, sender, args):
+        self.m.open_companion_chat_window()
+        self.m.ensure_engine().say("对话已打开，请对我说话。")
+
+    def _on_close_companion_chat(self, sender, args):
+        self.m.close_companion_chat_window()
+        self.m.ensure_engine().say("对话已结束。")
 
     def _on_pomo_settings(self, sender, args):
         self.m.open_dashboard_page("#timer")

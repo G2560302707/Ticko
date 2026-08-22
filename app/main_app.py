@@ -123,7 +123,7 @@ MB_ICONERROR = 0x10
 _state = {
     "window": None, "pet": None, "tray": None, "exiting": False, "engine": None,
     "pet_save_ts": 0, "pet_run": False, "pet_hwnd": None, "drag_alive": False,
-    "drag_moved": False, "js_busy": False, "js_pending": None, "work_ts": 0,
+    "drag_moved": False, "js_busy": False, "js_pending": None, "work_ts": 0, "chat_window": None,
 }
 
 
@@ -159,9 +159,13 @@ def _show_dashboard_hwnd():
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
         user32.SetForegroundWindow(hwnd)
-    ph = user32.FindWindowW(None, PET_TITLE)
-    if ph:
-        user32.ShowWindow(ph, SW_SHOW)
+    # 桌宠属于桌面层；主面板打开时暂时隐藏，避免遮挡数据和控件。
+    view = _state.get("pet_view")
+    if view:
+        try:
+            view.hide()
+        except Exception:
+            pass
     return bool(hwnd)
 
 
@@ -210,6 +214,60 @@ def open_dashboard_page(hash_name):
                 pass
 
     _call_webview(_go)
+
+
+def open_companion_chat_window():
+    """打开贴近桌宠的小型独立对话窗，不占用主面板。"""
+    def _open():
+        existing = _state.get("chat_window")
+        if existing:
+            try:
+                existing.show()
+                existing.restore()
+                return
+            except Exception:
+                _state["chat_window"] = None
+        try:
+            import webview
+            base_url = usage._backend.get("url")
+            if not base_url:
+                return
+            px, py = 32, 160
+            pet = _state.get("pet_view")
+            if pet and getattr(pet, "form", None):
+                try:
+                    px = max(16, int(pet.form.Location.X) - 440)
+                    py = max(16, int(pet.form.Location.Y) - 110)
+                except Exception:
+                    pass
+            chat = webview.create_window("和 Ticko 聊聊", base_url.rstrip("/") + "/companion-chat", width=420, height=560, min_size=(360, 420), x=px, y=py, text_select=True)
+            _state["chat_window"] = chat
+            try:
+                chat.events.closed += lambda: _state.__setitem__("chat_window", None)
+            except Exception:
+                pass
+        except Exception as exc:
+            usage.log.warning("打开独立对话窗失败：%s", exc)
+    _call_webview(_open)
+
+
+def close_companion_chat_window():
+    """结束一次语音对话并隐藏小窗，桌宠和主面板继续运行。"""
+    try:
+        import speech_util
+        speech_util.stop_listening()
+    except Exception:
+        pass
+    def _close():
+        chat = _state.get("chat_window")
+        if not chat:
+            return
+        try:
+            chat.destroy()
+        except Exception:
+            pass
+        _state["chat_window"] = None
+    _call_webview(_close)
 
 
 def acquire_mutex():
@@ -405,6 +463,11 @@ def load_pet_lines():
     return pet_engine.normalize_custom_lines(meta_get("pet_lines", ""))
 
 
+def load_interaction_level():
+    level = meta_get("ai_interaction_level", "medium")
+    return level if level in pet_engine.INTERACTION_LEVELS else "medium"
+
+
 def load_pet_pack():
     return usage.pet_packs.normalize_selected(
         usage.PET_PACKS_DIR, meta_get("pet_pack", "default")
@@ -461,6 +524,7 @@ def ensure_engine(x=None, y=None):
     eng = pet_engine.PetEngine(x, y, w, h, work, size_label=size_label)
     eng.set_mode(load_pet_mode())
     eng.set_speech_level(load_pet_speech())
+    eng.set_interaction_level(load_interaction_level())
     eng.set_custom_lines(load_pet_lines())
     eng.set_pet_pack(load_pet_pack())
     _state["engine"] = eng
@@ -588,6 +652,25 @@ def start_native_drag():
     threading.Thread(target=_native_drag_loop, daemon=True, name="pet-drag").start()
 
 
+def _start_auto_companion_reply(store, dashboard, behavior, trigger):
+    if _state.get("ai_companion_pending"):
+        return
+    _state["ai_companion_pending"] = True
+
+    def _worker():
+        try:
+            import pomodoro_util
+            result = usage.maybe_companion_auto_reply(store, dashboard, pomodoro_util.snapshot(), behavior, trigger)
+            if result:
+                usage.apply_companion_action(result["action"], result["snapshot"])
+        except Exception:
+            usage.log.warning("智能伙伴主动回应失败", exc_info=True)
+        finally:
+            _state["ai_companion_pending"] = False
+
+    threading.Thread(target=_worker, daemon=True, name="companion-reply").start()
+
+
 def _pet_runtime_tick():
     eng = _state.get("engine")
     if not eng or eng.dragging or not pet_enabled():
@@ -599,16 +682,20 @@ def _pet_runtime_tick():
         eng.work = logical_work_area(hwnd)
     eng.away = live_away()
     behavior = meta_get("companion_behavior", "companion")
+    eng.set_interaction_level(load_interaction_level())
     eng.quiet = behavior in ("focus", "quiet")
+    interaction_level = eng.interaction_level
+    poll_interval = {"light": 45, "medium": 20, "heavy": 8}[interaction_level]
     # 数据驱动的反应只在状态切换时发生，并以较低频率读取统计，避免打扰和
     # 避免在每一帧重复计算完整看板。
-    if now - float(_state.get("companion_poll_ts") or 0) >= 20:
+    if now - float(_state.get("companion_poll_ts") or 0) >= poll_interval:
         _state["companion_poll_ts"] = now
         try:
             store = getattr(usage.Handler, "store", None)
             if store:
+                dashboard = usage.Handler.__new__(usage.Handler).api_dashboard()
                 snap = usage.companion.build_snapshot(
-                    usage.Handler.__new__(usage.Handler).api_dashboard(),
+                    dashboard,
                     __import__("pomodoro_util").snapshot(),
                     behavior,
                 )
@@ -616,12 +703,17 @@ def _pet_runtime_tick():
                 prior = _state.get("companion_state")
                 _state["companion_state"] = state
                 if state != prior and state == "celebrate":
-                    eng.jump_t = 1.0
-                    eng.action, eng.action_t = "sway", 1.0
+                    eng.jump_t = 0.55 if interaction_level == "light" else 1.0
+                    if interaction_level != "light":
+                        eng.action, eng.action_t = "sway", 1.0
                     eng.say("今天的目标完成了，真棒！")
-                elif state != prior and state == "rest" and behavior != "quiet":
+                elif state != prior and state == "rest" and behavior != "quiet" and interaction_level != "light":
                     eng.action, eng.action_t = "stretch", 1.0
                     eng.say("回来后我们再继续。")
+                elif state != prior and state == "steady" and interaction_level == "heavy" and behavior != "quiet":
+                    eng.action, eng.action_t = "sway", 0.65
+                if state != prior:
+                    _start_auto_companion_reply(store, dashboard, behavior, state)
         except Exception:
             pass
     cursor = cursor_logical(hwnd) if eng.mode == "follow" else None
@@ -729,28 +821,29 @@ def _hook_companion_action(action, snapshot):
     """执行伙伴页的明确指令，并复用当前桌宠引擎与渲染通道。"""
     def _apply():
         eng = ensure_engine()
+        reply = str((snapshot or {}).get("reply") or "").strip()
         if action == "hello":
             eng.jump_t = 1.0
-            eng.say("我在，继续加油。")
+            eng.say(reply or "我在，继续加油。", stream=bool(reply))
         elif action == "walk":
             eng.set_mode("wander")
             eng.rest_until = 0
             eng.action, eng.action_t = "sway", 1.0
-            eng.say("出去走走，活动一下。")
+            eng.say(reply or "出去走走，活动一下。", stream=bool(reply))
         elif action == "celebrate":
             eng.jump_t = 1.0
             eng.action, eng.action_t = "sway", 1.0
-            eng.say("完成得漂亮！")
+            eng.say(reply or "完成得漂亮！", stream=bool(reply))
         elif action == "rest":
             eng.set_mode("still")
             eng.action, eng.action_t = "stretch", 1.0
-            eng.say("休息一下，回来再继续。")
+            eng.say(reply or "休息一下，回来再继续。", stream=bool(reply))
         elif action == "home":
             eng.set_mode("still")
             eng.work = logical_work_area(pet_hwnd())
             eng.x, eng.y = pet_geom.default_pet_pos_from_work(eng.work, eng.win_w, eng.win_h)
             move_pet_native(eng.x, eng.y)
-            eng.say("我先回到角落等你。")
+            eng.say(reply or "我先回到角落等你。", stream=bool(reply))
         else:
             return False
         push_pet_js_async(pose_payload(eng, {"jump": eng.jump_t, "action": eng.action or "", "say": eng.bubble_text}))
@@ -784,6 +877,18 @@ def hide_pet_window():
             usage.Handler.store.set_meta("show_pet", "0")
     except Exception:
         pass
+
+
+def restore_pet_after_dashboard():
+    """面板关闭后按用户原有开关恢复桌宠，不改变持久化设置。"""
+    if not pet_enabled():
+        return
+    view = _state.get("pet_view")
+    if view:
+        try:
+            view.show()
+        except Exception:
+            pass
 
 
 def _toggle_pet_from_tray():
@@ -1133,6 +1238,7 @@ def main():
             window.hide()
         except Exception:
             pass
+        restore_pet_after_dashboard()
         return False
 
     window.events.closing += on_closing
@@ -1160,6 +1266,10 @@ def main():
         _state["pet_view"] = view
         try:
             view.start(window, show=show_pet)
+            if show_pet:
+                # PetView 会按初始设置创建窗体；这里再次显式显示，避免
+                # WebView 初始化期间的焦点/可见性切换把已勾选的桌宠藏起来。
+                view.show()
         except Exception as e:
             usage.log.warning("桌宠窗口创建失败：%s", e)
         if not log_pet_geom():

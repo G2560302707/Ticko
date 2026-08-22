@@ -45,6 +45,8 @@ DRAG_LINES = ["哇——轻点轻点！", "起飞咯——", "放我下来！…
 MODES = ("wander", "follow", "still")
 SPEECH_LEVELS = ("silent", "normal", "chatty")
 SPEECH_CHANCE_SCALE = {"silent": 0.0, "normal": 1.0, "chatty": 3.0}
+INTERACTION_LEVELS = ("light", "medium", "heavy")
+ACTIVITY_SCALE = {"light": 0.42, "medium": 1.0, "heavy": 1.55}
 MAX_CUSTOM_LINES = 50
 MAX_CUSTOM_LINE_CHARS = 80
 
@@ -123,11 +125,15 @@ class PetEngine:
         self.dragging = False
         self.away = False
         self.bubble_text = ""
+        self.bubble_full_text = ""
+        self.bubble_streaming = False
+        self.bubble_stream_index = 0
         self.bubble_inner = False
         self.bubble_until = 0.0
         self.status_overlay = ""
         self.quiet = False
         self.speech_level = "normal"
+        self.interaction_level = "medium"
         self.custom_lines = ()
         self.last_line = ""
         self.last_speak_tick = 0
@@ -183,6 +189,12 @@ class PetEngine:
         self.speech_level = level
         return True
 
+    def set_interaction_level(self, level):
+        if level not in INTERACTION_LEVELS:
+            return False
+        self.interaction_level = level
+        return True
+
     def set_custom_lines(self, lines):
         self.custom_lines = normalize_custom_lines(lines)
         return self.custom_lines
@@ -197,15 +209,18 @@ class PetEngine:
     def snap(self):
         self.x, self.y = pet_geom.clamp_pet_pos(self.x, self.y, self.work, self.win_w, self.win_h)
 
-    def say(self, text, inner=False):
+    def say(self, text, inner=False, stream=False):
         if not text:
             return False
         if text == self.last_line:
             return False
         self.last_line = text
         self.bubble_inner = bool(inner)
-        self.bubble_text = ("（%s）" % text) if inner else text
-        self.bubble_until = self.now_ms() / 1000.0 + 2.8
+        self.bubble_full_text = ("（%s）" % text) if inner else text
+        self.bubble_streaming = bool(stream)
+        self.bubble_stream_index = 0
+        self.bubble_text = "" if stream else self.bubble_full_text
+        self.bubble_until = self.now_ms() / 1000.0 + max(2.8, len(self.bubble_full_text) * 0.075 + 2.2)
         return True
 
     def on_click(self):
@@ -258,9 +273,10 @@ class PetEngine:
     def _maybe_speak(self, events, chance):
         if self.quiet or self.speech_level == "silent":
             return
-        if self.t - self.last_speak_tick < SPEAK_COOLDOWN_TICKS:
+        scale = ACTIVITY_SCALE[self.interaction_level]
+        if self.t - self.last_speak_tick < int(SPEAK_COOLDOWN_TICKS / scale):
             return
-        chance = min(1.0, max(0.0, chance * SPEECH_CHANCE_SCALE[self.speech_level]))
+        chance = min(1.0, max(0.0, chance * SPEECH_CHANCE_SCALE[self.speech_level] * scale))
         if self.rng.random() >= chance:
             return
         self.last_speak_tick = self.t
@@ -276,7 +292,7 @@ class PetEngine:
 
     def _maybe_idle_action(self, events):
         self._maybe_speak(events, SPEAK_IDLE)
-        if self.rng.random() >= 0.01:
+        if self.rng.random() >= 0.01 * ACTIVITY_SCALE[self.interaction_level]:
             return
         pick = self.rng.random()
         if pick < 0.35:
@@ -304,6 +320,11 @@ class PetEngine:
     def tick(self, cursor=None):
         events = {}
         self.t += 1
+        if self.bubble_streaming and self.t % 2 == 0:
+            self.bubble_stream_index = min(len(self.bubble_full_text), self.bubble_stream_index + 1)
+            self.bubble_text = self.bubble_full_text[:self.bubble_stream_index]
+            if self.bubble_stream_index >= len(self.bubble_full_text):
+                self.bubble_streaming = False
         if self.jump_t > 0:
             self.jump_t = max(0.0, self.jump_t - 0.06)
         if self.cross_t > 0:
@@ -369,7 +390,8 @@ class PetEngine:
             dist = (dx * dx + dy * dy) ** 0.5
             if dist < 12:
                 self.target = None
-                self.rest_until = now_ms + self.rng.randint(8000, 18000)
+                scale = ACTIVITY_SCALE[self.interaction_level]
+                self.rest_until = now_ms + int(self.rng.randint(8000, 18000) / scale)
                 self._set_dir("down")
                 events["pos"] = True
                 events["pose"] = True
@@ -389,7 +411,7 @@ class PetEngine:
                 events["jump"] = 0.5
             self._maybe_speak(events, SPEAK_WALK)
 
-        target_speed = SPEED if self.target is not None else 0.0
+        target_speed = SPEED * ACTIVITY_SCALE[self.interaction_level] if self.target is not None else 0.0
         self.cur_speed += (target_speed - self.cur_speed) * 0.3
         pose = self._pose_key()
         if pose != self._pose:

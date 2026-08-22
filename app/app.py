@@ -57,11 +57,14 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import classify as classify_mod
 import companion
+import companion_ai
+import companion_templates
 import goals_util
 import pet_engine
 import pet_packs
 import pomodoro_util
 import sound_util
+import speech_util
 import theme_util
 BASE_DIR = os.path.dirname(SCRIPT_DIR)
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -71,6 +74,7 @@ PID_PATH = os.path.join(DATA_DIR, "app.pid")
 URL_PATH = os.path.join(DATA_DIR, "url.txt")
 LOCK_PATH = os.path.join(DATA_DIR, "instance.lock")
 DASHBOARD_PATH = os.path.join(SCRIPT_DIR, "dashboard.html")
+COMPANION_CHAT_PATH = os.path.join(SCRIPT_DIR, "companion_chat.html")
 ECHARTS_PATH = os.path.join(SCRIPT_DIR, "echarts.min.js")
 PET_DIR = os.path.join(SCRIPT_DIR, "pet")
 PET_HTML = os.path.join(PET_DIR, "pet.html")
@@ -243,6 +247,124 @@ def pet_settings_from_store(store):
         "pet_lines": lines,
         "pet_pack": pack_id,
     }
+
+
+def companion_ai_settings_from_store(store, include_secret=False):
+    settings = companion_ai.public_settings(store.get_meta)
+    settings["proactive_enabled"] = (store.get_meta("ai_proactive_enabled") or "1") == "1"
+    settings["voice_enabled"] = (store.get_meta("ai_voice_enabled") or "0") == "1"
+    settings["voice_input_enabled"] = (store.get_meta("ai_voice_input_enabled") or "1") == "1"
+    try:
+        settings["voice_rate"] = max(-4, min(4, int(store.get_meta("ai_voice_rate") or 0)))
+    except Exception:
+        settings["voice_rate"] = 0
+    preset = store.get_meta("ai_voice_preset") or "cute"
+    settings["voice_preset"] = preset if preset in speech_util.VOICE_PRESETS else "cute"
+    settings["speech"] = speech_util.status()
+    if include_secret:
+        settings["api_key"] = store.get_meta("ai_api_key") or ""
+    return settings
+
+
+def companion_history_from_store(store):
+    try:
+        items = json.loads(store.get_meta("ai_history") or "[]")
+    except Exception:
+        items = []
+    clean = []
+    for item in items if isinstance(items, list) else []:
+        role = "assistant" if item.get("role") == "assistant" else "user"
+        content = companion_ai.clean_text(item.get("content"), companion_ai.MAX_REPLY)
+        if content:
+            # 旧版本在模型额度耗尽时会重复写入同一句本地庆祝语；不再把它反复显示或喂回模型。
+            if role == "assistant" and clean and clean[-1].get("role") == role and clean[-1].get("content") == content:
+                continue
+            clean.append({"role": role, "content": content})
+    return clean[-companion_ai.MAX_HISTORY:]
+
+
+def companion_templates_from_store(store):
+    try:
+        raw = json.loads(store.get_meta("offline_reply_templates") or "[]")
+    except Exception:
+        raw = []
+    return companion_templates.normalize_custom(raw)
+
+
+def companion_action_reply(snapshot, action):
+    """伙伴控制台的即时动作台词，保持与当日数据和动作一致。"""
+    active = max(0, int((snapshot or {}).get("active_seconds") or 0) // 60)
+    switches = max(0, int((snapshot or {}).get("switches") or 0))
+    lines = {
+        "hello": "你好，我在呢。今天已经有效投入 %d 分钟了。" % active,
+        "walk": "我们去走走吧。今天已经切换 %d 次，活动一下再回来继续。" % switches,
+        "celebrate": "做得漂亮，今天的每一点投入都值得庆祝。",
+        "rest": "先休息一会儿，回来以后我们再继续。",
+        "home": "我先回到角落等你。需要时，随时叫我。",
+    }
+    return lines.get(action, "我在这里陪着你。")
+
+
+def companion_ai_usage_from_store(store, level="medium"):
+    today = date_str(time.time())
+    try:
+        usage = json.loads(store.get_meta("ai_usage") or "{}")
+    except Exception:
+        usage = {}
+    if usage.get("date") != today:
+        usage = {"date": today, "requests": 0, "estimated_tokens": 0, "auto_events": 0}
+    policy = companion_ai.level_policy(level)
+    return {
+        "requests": max(0, int(usage.get("requests") or 0)),
+        "estimated_tokens": max(0, int(usage.get("estimated_tokens") or 0)),
+        "auto_events": max(0, int(usage.get("auto_events") or 0)),
+        "request_limit": policy["daily_requests"],
+        "level": companion_ai.normalize_interaction_level(level),
+    }
+
+
+def record_companion_ai_usage(store, level, request_text, reply_text, auto=False):
+    usage = companion_ai_usage_from_store(store, level)
+    usage["requests"] += 1
+    if auto:
+        usage["auto_events"] += 1
+    # 中文按约两个字符一个 token 的保守估算；用于额度展示，不冒充服务商账单。
+    usage["estimated_tokens"] += max(1, (len(request_text or "") + len(reply_text or "")) // 2)
+    store.set_meta("ai_usage", json.dumps({"date": date_str(time.time()), "requests": usage["requests"], "estimated_tokens": usage["estimated_tokens"], "auto_events": usage["auto_events"]}, ensure_ascii=False))
+    return usage
+
+
+def maybe_companion_auto_reply(store, dashboard, pomodoro, behavior, trigger):
+    """仅在中/重度模式的状态切换时生成一次主动回应，调用方应放在后台线程。"""
+    settings = companion_ai_settings_from_store(store, include_secret=True)
+    level = settings["interaction_level"]
+    policy = companion_ai.level_policy(level)
+    if level == "light" or not settings["proactive_enabled"] or not settings["enabled"] or settings["provider"] == "off":
+        return None
+    usage = companion_ai_usage_from_store(store, level)
+    now = time.time()
+    try:
+        last = float(store.get_meta("ai_auto_last_ts") or 0)
+    except Exception:
+        last = 0
+    if usage["requests"] >= usage["request_limit"] or usage["auto_events"] >= policy["auto_events"] or now - last < policy["cooldown"]:
+        return None
+    snapshot = companion.build_snapshot(dashboard, pomodoro, behavior)
+    if settings.get("share_app"):
+        snapshot["current_app"] = (dashboard.get("status") or {}).get("app") or ""
+    history = companion_history_from_store(store)
+    prompt = "现在是%s。请主动给我一句简短陪伴，不要解释数据来源。" % (snapshot.get("label") or trigger)
+    reply = companion_ai.generate(settings, snapshot, prompt, history, snapshot.get("recommendation"), companion_templates_from_store(store))
+    if reply.get("source") != "model":
+        return None
+    store.set_meta("ai_auto_last_ts", str(now))
+    record_companion_ai_usage(store, level, prompt, reply["reply"], auto=True)
+    history.append({"role": "assistant", "content": reply["reply"]})
+    store.set_meta("ai_history", json.dumps(history[-companion_ai.MAX_HISTORY:], ensure_ascii=False))
+    snapshot["reply"] = reply["reply"]
+    snapshot.pop("current_app", None)
+    speech_util.speak_async(reply["reply"], settings["voice_enabled"], settings["voice_rate"], settings["voice_preset"])
+    return {"action": reply.get("action") or "hello", "snapshot": snapshot}
 
 
 def live_elapsed(live_start, now):
@@ -1102,6 +1224,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "companion_behavior",
                     companion.normalize_behavior(data.get("companion_behavior")),
                 )
+            ai_keys = ("ai_enabled", "ai_provider", "ai_base_url", "ai_model", "ai_share_app", "ai_name", "ai_persona", "ai_custom_prompt", "ai_interaction_level", "ai_proactive_enabled", "ai_voice_enabled", "ai_voice_input_enabled", "ai_voice_rate", "ai_voice_preset")
+            if any(k in data for k in ai_keys) or "ai_api_key" in data or data.get("clear_ai_api_key"):
+                current_ai = companion_ai_settings_from_store(self.store)
+                next_ai = companion_ai.validate_config(data, current_ai)
+                self.store.set_meta("ai_enabled", "1" if next_ai["enabled"] else "0")
+                self.store.set_meta("ai_provider", next_ai["provider"])
+                self.store.set_meta("ai_base_url", next_ai["base_url"])
+                self.store.set_meta("ai_model", next_ai["model"])
+                self.store.set_meta("ai_share_app", "1" if next_ai["share_app"] else "0")
+                self.store.set_meta("ai_name", next_ai["name"])
+                self.store.set_meta("ai_persona", next_ai["persona"])
+                self.store.set_meta("ai_custom_prompt", next_ai["custom_prompt"])
+                self.store.set_meta("ai_interaction_level", next_ai["interaction_level"])
+                self.store.set_meta("ai_proactive_enabled", "1" if bool(data.get("ai_proactive_enabled", current_ai["proactive_enabled"])) else "0")
+                self.store.set_meta("ai_voice_enabled", "1" if bool(data.get("ai_voice_enabled", current_ai["voice_enabled"])) else "0")
+                self.store.set_meta("ai_voice_input_enabled", "1" if bool(data.get("ai_voice_input_enabled", current_ai["voice_input_enabled"])) else "0")
+                try:
+                    voice_rate = max(-4, min(4, int(data.get("ai_voice_rate", current_ai["voice_rate"]))))
+                except Exception:
+                    voice_rate = current_ai["voice_rate"]
+                self.store.set_meta("ai_voice_rate", str(voice_rate))
+                voice_preset = str(data.get("ai_voice_preset", current_ai["voice_preset"]))
+                self.store.set_meta("ai_voice_preset", voice_preset if voice_preset in speech_util.VOICE_PRESETS else "cute")
+                if data.get("clear_ai_api_key"):
+                    self.store.set_meta("ai_api_key", "")
+                elif "ai_api_key" in data:
+                    key = companion_ai.clean_text(data.get("ai_api_key"), 600)
+                    if key:
+                        self.store.set_meta("ai_api_key", key)
             pet_keys = ("pet_mode", "pet_size", "pet_speech", "pet_lines", "pet_pack")
             pet_changed = any(k in data for k in pet_keys)
             if pet_changed:
@@ -1168,6 +1319,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_themes_post(raw)
         elif path == "/api/pets":
             self._handle_pet_packs_post(raw)
+        elif path == "/api/companion/chat":
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                data = {}
+            self._send(200, json.dumps(self.api_companion_chat(data), ensure_ascii=False))
+        elif path == "/api/companion/templates":
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                data = {}
+            self._send(200, json.dumps(self.api_companion_templates(data), ensure_ascii=False))
+        elif path == "/api/companion/transcribe":
+            settings = companion_ai_settings_from_store(self.store)
+            if not settings.get("voice_input_enabled"):
+                self._send(403, json.dumps({"ok": False, "error": "语音输入已关闭"}, ensure_ascii=False))
+                return
+            logging.info("收到伙伴语音：%s 字节，frames=%s，rms=%s", len(raw), self.headers.get("X-Ticko-Audio-Frames", "?"), self.headers.get("X-Ticko-Audio-Rms", "?"))
+            text, error = speech_util.transcribe_wav(raw)
+            logging.info("伙伴语音识别：%s", "成功" if text else (error or "无结果"))
+            status = 200 if text else 400
+            self._send(status, json.dumps({"ok": bool(text), "text": text, "error": error}, ensure_ascii=False))
+        elif path == "/api/companion/listen":
+            settings = companion_ai_settings_from_store(self.store)
+            if not settings.get("voice_input_enabled"):
+                self._send(403, json.dumps({"ok": False, "error": "语音输入已关闭"}, ensure_ascii=False))
+            else:
+                started = speech_util.listen_once_async()
+                self._send(200, json.dumps({"ok": True, "started": started, "listen": speech_util.listen_status()}, ensure_ascii=False))
+        elif path == "/api/companion/listen/stop":
+            speech_util.stop_listening()
+            self._send(200, json.dumps({"ok": True, "listen": speech_util.listen_status()}, ensure_ascii=False))
+        elif path == "/api/companion/history":
+            self.store.set_meta("ai_history", "[]")
+            self._send(200, json.dumps({"ok": True, "history": []}, ensure_ascii=False))
+        elif path == "/api/companion/test":
+            settings = companion_ai_settings_from_store(self.store, include_secret=True)
+            ok, message = companion_ai.test_connection(settings)
+            self._send(200 if ok else 400, json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
         elif path == "/api/companion":
             try:
                 data = json.loads(raw.decode("utf-8") or "{}")
@@ -1178,7 +1368,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"ok": False, "error": "未知伙伴动作"}, ensure_ascii=False))
                 return
             snap = self.api_companion()
-            self._send(200, json.dumps({"ok": apply_companion_action(action, snap), "companion": snap}, ensure_ascii=False))
+            snap["reply"] = companion_action_reply(snap, action)
+            applied = apply_companion_action(action, snap)
+            settings = companion_ai_settings_from_store(self.store)
+            # 控制台动作的朗读不依赖桌宠窗体回调：窗体初始化稍慢时，仍应立即说话。
+            speech_util.speak_stream_async(snap["reply"], settings["voice_enabled"], settings["voice_rate"], settings["voice_preset"])
+            self._send(200, json.dumps({"ok": True, "pet_applied": applied, "companion": snap}, ensure_ascii=False))
         elif path == "/api/shutdown":
             self._send(200, json.dumps({"ok": True}))
             request_shutdown()
@@ -1408,6 +1603,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             self._file(DASHBOARD_PATH, "text/html; charset=utf-8")
+        elif path in ("/companion-chat", "/companion-chat.html"):
+            self._file(COMPANION_CHAT_PATH, "text/html; charset=utf-8")
         elif path == "/echarts.min.js":
             self._file(ECHARTS_PATH, "application/javascript")
         elif path in ("/pet.html", "/pet", "/pet/"):
@@ -1438,6 +1635,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps(self.api_pet_packs(), ensure_ascii=False))
         elif path == "/api/companion":
             self._send(200, json.dumps(self.api_companion(), ensure_ascii=False))
+        elif path == "/api/companion/history":
+            self._send(200, json.dumps({"items": companion_history_from_store(self.store)}, ensure_ascii=False))
+        elif path == "/api/companion/templates":
+            self._send(200, json.dumps({"ok": True, **companion_templates.public_items(companion_templates_from_store(self.store))}, ensure_ascii=False))
+        elif path == "/api/companion/listen":
+            self._send(200, json.dumps({"ok": True, "listen": speech_util.listen_status()}, ensure_ascii=False))
+        elif path == "/api/companion/speaking":
+            self._send(200, json.dumps({"ok": True, "speaking": speech_util.is_speaking()}, ensure_ascii=False))
         elif path == "/api/settings":
             self._send(200, json.dumps(self.api_settings(), ensure_ascii=False))
         elif path == "/api/ping":
@@ -1778,11 +1983,86 @@ class Handler(http.server.BaseHTTPRequestHandler):
         result["companion_behavior"] = companion.normalize_behavior(
             self.store.get_meta("companion_behavior") or "companion"
         )
+        ai = companion_ai_settings_from_store(self.store)
+        ai["usage"] = companion_ai_usage_from_store(self.store, ai["interaction_level"])
+        result["ai_companion"] = ai
         return result
 
     def api_companion(self):
         behavior = companion.normalize_behavior(self.store.get_meta("companion_behavior") or "companion")
         return companion.build_snapshot(self.api_dashboard(), pomodoro_util.snapshot(), behavior)
+
+    def api_companion_chat(self, data):
+        message = companion_ai.clean_text((data or {}).get("message"), companion_ai.MAX_MESSAGE)
+        dashboard = self.api_dashboard()
+        behavior = companion.normalize_behavior(self.store.get_meta("companion_behavior") or "companion")
+        snapshot = companion.build_snapshot(dashboard, pomodoro_util.snapshot(), behavior)
+        settings = companion_ai_settings_from_store(self.store, include_secret=True)
+        if settings.get("share_app"):
+            snapshot["current_app"] = (dashboard.get("status") or {}).get("app") or ""
+        history = companion_history_from_store(self.store)
+        usage = companion_ai_usage_from_store(self.store, settings["interaction_level"])
+        capped = settings.get("enabled") and settings.get("provider") != "off" and usage["requests"] >= usage["request_limit"]
+        generate_settings = dict(settings)
+        if capped:
+            generate_settings["enabled"] = False
+        reply = companion_ai.generate(generate_settings, snapshot, message, history, snapshot.get("recommendation"), companion_templates_from_store(self.store))
+        if capped:
+            reply["error"] = "今日模型额度已用完，已切换本地回应"
+        elif reply.get("source") == "model":
+            usage = record_companion_ai_usage(self.store, settings["interaction_level"], message, reply.get("reply"))
+        history.extend([
+            {"role": "user", "content": message or "给我一句陪伴。"},
+            {"role": "assistant", "content": reply["reply"]},
+        ])
+        history = history[-companion_ai.MAX_HISTORY:]
+        self.store.set_meta("ai_history", json.dumps(history, ensure_ascii=False))
+        action = reply.get("action") if reply.get("action") in companion.ACTION_NAMES else "hello"
+        snapshot["reply"] = reply["reply"]
+        apply_companion_action(action, snapshot)
+        # 对话是用户主动触发的，即使未开启主动朗读也应完整说出回应。
+        speech_util.speak_stream_async(reply["reply"], True, settings["voice_rate"], settings["voice_preset"])
+        public_snapshot = dict(snapshot)
+        public_snapshot.pop("current_app", None)
+        return {
+            "ok": True,
+            "reply": reply["reply"],
+            "action": action,
+            "source": reply["source"],
+            "fallback_reason": reply.get("error") or "",
+            "usage": usage,
+            "companion": public_snapshot,
+            "history": history,
+        }
+
+    def api_companion_templates(self, data):
+        """只允许管理用户自定义的离线模板；内置模板始终保留作安全兜底。"""
+        custom = companion_templates_from_store(self.store)
+        action = str((data or {}).get("action") or "")
+        if action == "create":
+            item = companion_templates.normalize_item((data or {}).get("item"))
+            if not item:
+                return {"ok": False, "error": "请填写回复内容"}
+            if len(custom) >= companion_templates.MAX_CUSTOM:
+                return {"ok": False, "error": "最多可添加 %d 条自定义模板" % companion_templates.MAX_CUSTOM}
+            custom.append(item)
+        elif action == "update":
+            item = companion_templates.normalize_item((data or {}).get("item"))
+            if not item:
+                return {"ok": False, "error": "请填写回复内容"}
+            for index, old in enumerate(custom):
+                if old["id"] == item["id"]:
+                    custom[index] = item
+                    break
+            else:
+                return {"ok": False, "error": "未找到该自定义模板"}
+        elif action == "delete":
+            target = str((data or {}).get("id") or "")
+            custom = [item for item in custom if item["id"] != target]
+        else:
+            return {"ok": False, "error": "未知模板操作"}
+        self.store.set_meta("offline_reply_templates", json.dumps(custom, ensure_ascii=False))
+        return {"ok": True, **companion_templates.public_items(custom)}
 
     def api_week(self):
         today = datetime.date.today()
@@ -1908,6 +2188,7 @@ def start_backend(serve_in_thread=True):
         sound_util.ensure_defaults()
     except Exception:
         log.warning("生成默认提醒音失败", exc_info=True)
+    speech_util.warmup_offline_voice()
     stop = threading.Event()
     threading.Thread(target=collector_loop, args=(tracker, stop), daemon=True).start()
     Handler.tracker = tracker
