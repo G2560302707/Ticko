@@ -1131,6 +1131,13 @@ def quit_app():
                 w.destroy()
             except Exception:
                 pass
+    chat = _state.get("chat_window")
+    if chat:
+        try:
+            chat.destroy()
+        except Exception:
+            pass
+        _state["chat_window"] = None
 
 
 def start_tray():
@@ -1311,6 +1318,13 @@ def main():
                 tray.stop()
             except Exception:
                 pass
+        chat = _state.get("chat_window")
+        if chat:
+            try:
+                chat.destroy()
+            except Exception:
+                pass
+            _state["chat_window"] = None
         usage.shutdown_backend()
 
 
